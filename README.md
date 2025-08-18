@@ -2,7 +2,7 @@
 
 A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and detail-preserving stitching.
 
-WARNING: This is not magic - although it sometimes seems that way. It makes errors. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler process I tested. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
+WARNING: This is not magic - although it sometimes may seem that way. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler processes I tested so far. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
 
 ## Features
 
@@ -11,6 +11,25 @@ WARNING: This is not magic - although it sometimes seems that way. It makes erro
 - **Memory Optimized**: Prevents OOM errors using configurable tile-based upscaling
 - **SeedVR2 Integration**: Works with all SeedVR2 model variants (3B/7B, FP16/FP8, Sharp versions)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
+
+## How It Works
+
+1. Input image is divided into overlapping tiles
+2. Each tile is upscaled using SeedVR2 to a fixed resolution
+3. Upscaled tiles are resized to their final target dimensions
+4. **Detail-Preserving Stitching**: 
+   - **Zero-blur mode**: Mathematical pixel averaging for seamless blending without detail loss
+   - **Smart blur mode**: Controlled blur only at tile boundaries (max 3 pixels)
+
+## A personal suggestion
+
+I also included example workflows (in the 'workflows' directory). Use the the advanced workflow for even better outputs. This one will do a first pass with the regular SeedVR2 node and then pass that output to a second pass, which does the tiled upscaling. The advanced workflow uses one of my other nodes from the "moonpack" (ProportionalDimension, https://github.com/moonwhaler/comfyui-moonpack).
+
+### But why?
+
+A little "trick" is to downscale the image (yes, we degrade quality at first) and add static noise (which provides variance when upscaling). After that the upscale is able to "create" finer details. The downside is that the original image is altered more. You can play around with this using the provided "switches" in the advanced workflow (less downscale, less new details, but more true to the original image - add more noise to get more variance in finer parts of the image). 
+
+In my tests the results were sometimes exceptional, sometimes "meh", depending on what I wanted to get (illustrations, portraits etc.). This also depends on the seed. I suggest using a random one to get slightly altered outputs - or a fixed one to compare changes.
 
 ## Installation
 
@@ -27,7 +46,7 @@ cd ComfyUI/custom_nodes/
 git clone https://github.com/moonwhaler/UltimateResupscaler.git
 ```
 
-2. Install dependencies:
+2. Install dependencies (outside of ComfyUI):
 
 **IMPORTANT**: The requirements must be installed in the same Python environment that ComfyUI uses. This is typically a virtual environment (venv) or conda environment.
 
@@ -156,21 +175,17 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 - Try `mask_blur`: 0 (faster than complex blending)
 - Reduce `tile_padding` if seams aren't visible
 
-## How It Works
-
-1. **Tiling**: Input image is divided into overlapping tiles
-2. **Memory-Safe Upscaling**: Each tile is upscaled using SeedVR2 to a fixed resolution
-3. **Resizing**: Upscaled tiles are resized to their final target dimensions
-4. **Detail-Preserving Stitching**: 
-   - **Zero-blur mode**: Mathematical pixel averaging for seamless blending without detail loss
-   - **Smart blur mode**: Controlled blur only at tile boundaries (max 3 pixels)
-
 ## License
 
-This project is licensed under the same terms as the included code dependencies.
+MIT No Attribution
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## Credits
 
-- Based on the Ultimate SD Upscale methodology
+- Partly based on the Ultimate SD Upscale methodology and adapted to the SeedVR2 process
 - Adapted for SeedVR2 models with detail preservation focus
 - Built for ComfyUI ecosystem
+- Example image (https://www.flickr.com/photos/160246067@N08/44726249090, public domain license) by TLC Jonhson (https://www.flickr.com/photos/160246067@N08/)
