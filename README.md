@@ -1,4 +1,4 @@
-# Ultimate SeedVR2 Upscaler
+# SeedVR2 Tiling Upscaler
 
 A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and detail-preserving stitching.
 
@@ -65,7 +65,7 @@ cd UltimateResupscaler
 
 3. Restart ComfyUI
 
-The node will appear in the `image/upscaling` category as "Ultimate SeedVR2 Upscaler".
+The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscaler".
 
 ## Requirements
 
@@ -83,7 +83,7 @@ The node will appear in the `image/upscaling` category as "Ultimate SeedVR2 Upsc
 
 ## Usage
 
-1. Add the "Ultimate SeedVR2 Upscaler" node to your ComfyUI workflow
+1. Add the "SeedVR2 Tiling Upscaler" node to your ComfyUI workflow
 2. Connect your input image
 3. Select your desired SeedVR2 model
 4. Configure parameters

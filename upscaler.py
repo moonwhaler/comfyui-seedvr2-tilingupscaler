@@ -7,7 +7,7 @@ from .tiling import generate_tiles
 from .stitching import process_and_stitch
 
 
-class UltimateSeedVR2Upscaler:
+class SeedVR2TilingUpscaler:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -89,9 +89,9 @@ class UltimateSeedVR2Upscaler:
 
 
 NODE_CLASS_MAPPINGS = {
-    "UltimateSeedVR2Upscaler": UltimateSeedVR2Upscaler
+    "SeedVR2TilingUpscaler": SeedVR2TilingUpscaler
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "UltimateSeedVR2Upscaler": "Ultimate SeedVR2 Upscaler"
+    "SeedVR2TilingUpscaler": "SeedVR2 Tiling Upscaler"
 }
