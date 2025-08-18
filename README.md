@@ -159,6 +159,7 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 - Reduce `tile_upscale_resolution`
 - Enable `preserve_vram`
 - Reduce `tile_width` and `tile_height`
+- Use the "SeedVR2 BlockSwap Config" (from the original SeedVR2 nodes) and attach it to the "block_swap_config" input of the Tiling Upscaler node. Set the "blocks_to_swap" value until you won't get any OOMs anymore. You need RAM for that in return!
 
 ### Visible Seams
 - Try `mask_blur`: 1 or 2
