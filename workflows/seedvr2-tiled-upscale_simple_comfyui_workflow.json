@@ -1,0 +1,373 @@
+{
+  "id": "ae70f9f9-9985-4bef-8e4e-0d4c1f281e51",
+  "revision": 0,
+  "last_node_id": 136,
+  "last_link_id": 178,
+  "nodes": [
+    {
+      "id": 134,
+      "type": "Image Comparer (rgthree)",
+      "pos": [
+        -10840,
+        6000
+      ],
+      "size": [
+        1020,
+        1160
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "image_a",
+          "type": "IMAGE",
+          "link": 174
+        },
+        {
+          "dir": 3,
+          "name": "image_b",
+          "type": "IMAGE",
+          "link": 173
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "e6ae355bb833cd25fdc1fb50642adf53372a4829",
+        "comparer_mode": "Slide",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_esnqk_00005_.png&type=temp&subfolder=&rand=0.5669334104517141"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_esnqk_00006_.png&type=temp&subfolder=&rand=0.691890404054576"
+          }
+        ]
+      ],
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 130,
+      "type": "MarkdownNote",
+      "pos": [
+        -12440,
+        5820
+      ],
+      "size": [
+        860,
+        100
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        "## Info\nThis workflow is part of the \"comfyui-seedvr2-tilingupscaler\" custom node. I suggest reading the readme on my Github page (https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler). "
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 132,
+      "type": "LoadImage",
+      "pos": [
+        -12440,
+        6100
+      ],
+      "size": [
+        860,
+        480
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            172,
+            174
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.45",
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        "44726249090_905c8b0691_c.jpg",
+        "image"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 129,
+      "type": "MarkdownNote",
+      "pos": [
+        -12440,
+        5960
+      ],
+      "size": [
+        860,
+        88
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        "## Attention\nIf you get OOM errors this might have to do with upscaled tiles being too large for processing in your VRAM/RAM. See \"Tiling Upscaler\" settings for tile_width and tile_height - plus tile_upscale_resolution (beware this setting defines the \"short side\", meaning the resulting upscale might be bigger and becomes too big for your VRAM/RAM."
+      ],
+      "color": "#332922",
+      "bgcolor": "#593930"
+    },
+    {
+      "id": 136,
+      "type": "SeedVR2BlockSwap",
+      "pos": [
+        -11540,
+        6220
+      ],
+      "size": [
+        287.776123046875,
+        154
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "block_swap_config",
+          "type": "block_swap_config",
+          "links": [
+            177
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "numz/ComfyUI-SeedVR2_VideoUpscaler",
+        "ver": "4df5cef5937001bcef056d5508c6a884849ffe13",
+        "Node name for S&R": "SeedVR2BlockSwap"
+      },
+      "widgets_values": [
+        30,
+        true,
+        true,
+        true,
+        false
+      ]
+    },
+    {
+      "id": 135,
+      "type": "SaveImage",
+      "pos": [
+        -10840,
+        5480
+      ],
+      "size": [
+        320,
+        440
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 178
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.50",
+        "Node name for S&R": "SaveImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        "upscaled/Simple_SeedVR2_Upscaled_%date:yyyy-MM-dd-hh-mm-ss%"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 133,
+      "type": "SeedVR2TilingUpscaler",
+      "pos": [
+        -11240,
+        6220
+      ],
+      "size": [
+        280,
+        400
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 172
+        },
+        {
+          "name": "block_swap_config",
+          "shape": 7,
+          "type": "block_swap_config",
+          "link": 177
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            173,
+            178
+          ]
+        }
+      ],
+      "title": "Tiling Upscaler",
+      "properties": {
+        "Node name for S&R": "SeedVR2TilingUpscaler",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "model": true,
+            "seed": true,
+            "new_resolution": true,
+            "preserve_vram": true,
+            "tile_width": true,
+            "tile_height": true,
+            "mask_blur": true,
+            "tile_padding": true,
+            "tile_upscale_resolution": true,
+            "tiling_strategy": true
+          },
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        "seedvr2_ema_7b_fp16.safetensors",
+        4232779585,
+        "randomize",
+        3008,
+        false,
+        512,
+        512,
+        0,
+        64,
+        1280,
+        "Linear",
+        "Upscale completed!"
+      ]
+    }
+  ],
+  "links": [
+    [
+      172,
+      132,
+      0,
+      133,
+      0,
+      "IMAGE"
+    ],
+    [
+      173,
+      133,
+      0,
+      134,
+      1,
+      "IMAGE"
+    ],
+    [
+      174,
+      132,
+      0,
+      134,
+      0,
+      "IMAGE"
+    ],
+    [
+      177,
+      136,
+      0,
+      133,
+      1,
+      "block_swap_config"
+    ],
+    [
+      178,
+      133,
+      0,
+      135,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.7627768444385478,
+      "offset": [
+        12315.186374093457,
+        -5722.670556786765
+      ]
+    },
+    "frontendVersion": "1.26.2",
+    "ue_links": [],
+    "links_added_by_ue": [],
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

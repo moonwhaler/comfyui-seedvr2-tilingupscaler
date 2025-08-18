@@ -27,9 +27,9 @@ I also included example workflows (in the 'workflows' directory). Use the the ad
 
 ### But why?
 
-A little "trick" is to downscale the image (yes, we degrade quality at first) and add static noise (which provides variance when upscaling). After that the upscale is able to "create" finer details. The downside is that the original image is altered more. You can play around with this using the provided "switches" in the advanced workflow (less downscale, less new details, but more true to the original image - add more noise to get more variance in finer parts of the image). 
+A little "trick" is to downscale the image (yes, we degrade quality at first) and add static noise (which provides variance when upscaling). After that the upscale is able to "create" finer details. The downside is that the original image is altered more. You can play around with this using the provided "switches" in the advanced workflow (less downscale, less new details, but more true to the original image - add more noise to get more variance in finer parts of the image). If you have text in an image and want to preserve it, you should go for a very low downscale factor!
 
-In my tests the results were sometimes exceptional, sometimes "meh", depending on what I wanted to get (illustrations, portraits etc.). This also depends on the seed. I suggest using a random one to get slightly altered outputs - or a fixed one to compare changes.
+In my tests the results were sometimes exceptional, sometimes "meh", depending on what I wanted to get (illustrations, portraits etc.). This also depends on the seed. I suggest using a random one to get slightly altered outputs - or a fixed one to compare changes. 
 
 ## Installation
 
@@ -174,6 +174,10 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 - Use Linear tiling
 - Try `mask_blur`: 0 (faster than complex blending)
 - Reduce `tile_padding` if seams aren't visible
+
+## Known issues
+
+The progressbar in ComfyUI is showing "???" when the tiling upscaler is working. This is not an error per-se, but a nuisance.
 
 ## License
 
