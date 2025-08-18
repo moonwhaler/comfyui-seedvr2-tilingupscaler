@@ -41,7 +41,7 @@ class UltimateSeedVR2Upscaler:
                 "preserve_vram": ("BOOLEAN", {"default": False}),
                 "tile_width": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
                 "tile_height": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
-                "mask_blur": ("INT", {"default": 8, "min": 0, "max": 64, "step": 1}),
+                "mask_blur": ("INT", {"default": 16, "min": 0, "max": 64, "step": 1}),
                 "tile_padding": ("INT", {"default": 32, "min": 0, "max": 8192, "step": 8}),
                 "tile_upscale_resolution": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
                 "tiling_strategy": (["Chess", "Linear"],),
@@ -72,6 +72,9 @@ class UltimateSeedVR2Upscaler:
         total_steps = self._calculate_total_steps(pil_image, tile_width, tile_height, seam_fix_mode, seam_fix_width)
         progress = Progress(total_steps)
 
+        # Store original image for base creation
+        self._original_image = pil_image
+        
         # Main upscale pass
         main_tiles = self._generate_tiles(pil_image, tile_width, tile_height, tile_padding, tiling_strategy)
         output_image = self._process_and_stitch(main_tiles, output_width, output_height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress)
@@ -147,28 +150,30 @@ class UltimateSeedVR2Upscaler:
             "padding": (left_pad, top_pad, right_pad, bottom_pad),
         }
 
-    def _process_and_stitch(self, tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress):
-        # Start with the first processed tile as the base image
-        if not tiles:
-            return Image.new('RGB', (width, height), (0, 0, 0))
+    def _process_and_stitch(self, tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None):
+        # Create base image if not provided
+        if base_image is None:
+            # For the main pass, create a better base using SeedVR2 at low resolution
+            if hasattr(self, '_original_image'):
+                # Create base by upscaling original at low resolution for better quality
+                base_tensor = pil_to_tensor(self._original_image)
+                base_upscaled_tuple = seedvr2_instance.execute(
+                    images=base_tensor, 
+                    model=model, 
+                    seed=seed, 
+                    new_resolution=min(512, tile_upscale_resolution//2),  # Lower res for base
+                    batch_size=1, 
+                    preserve_vram=preserve_vram, 
+                    block_swap_config=block_swap_config
+                )
+                base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
+                base_image = base_upscaled.resize((width, height), Image.LANCZOS)
+            else:
+                base_image = Image.new('RGB', (width, height), (128, 128, 128))
         
-        # Process the first tile to get the base image
-        first_tile = tiles[0]
-        progress.update()
-        
-        first_tile_tensor = pil_to_tensor(first_tile["tile"])
-        first_upscaled_tuple = seedvr2_instance.execute(images=first_tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
-        first_ai_upscaled = tensor_to_pil(first_upscaled_tuple[0])
-        
-        target_tile_width = int(first_tile["tile"].width * upscale_factor)
-        target_tile_height = int(first_tile["tile"].height * upscale_factor)
-        first_resized = first_ai_upscaled.resize((target_tile_width, target_tile_height), Image.LANCZOS)
-        
-        # Create base image by upscaling the original with simple resize first
-        base_image = first_tile["tile"].resize((width, height), Image.LANCZOS)
         output_image = base_image.copy()
 
-        # Now process all tiles (including the first one again)
+        # Process all tiles
         for tile_info in tiles:
             progress.update()
             
@@ -202,13 +207,8 @@ class UltimateSeedVR2Upscaler:
             )
             cropped_tile = resized_tile.crop(crop_box)
             
-            # Create a simple rectangular mask for this tile region
-            tile_mask = Image.new('L', (final_tile_width, final_tile_height), 255)
-            
-            # Apply Gaussian blur to the mask if specified (following UltimateSDUpscale)
-            if mask_blur > 0:
-                from PIL import ImageFilter
-                tile_mask = tile_mask.filter(ImageFilter.GaussianBlur(mask_blur))
+            # Create a feathered mask for better blending at tile edges
+            tile_mask = self._create_feathered_tile_mask(final_tile_width, final_tile_height, mask_blur, tile_info["padding"])
             
             # Create RGBA version of the tile for compositing
             tile_rgba = Image.new('RGBA', output_image.size, (0, 0, 0, 0))
@@ -226,25 +226,50 @@ class UltimateSeedVR2Upscaler:
 
         return output_image
 
-    def _create_tile_mask(self, width, height, blur_radius, padding_info, upscale_factor):
-        """Create a simple rectangular mask with Gaussian blur"""
+    def _create_feathered_tile_mask(self, width, height, blur_radius, padding_info):
+        """Create a smooth distance-based mask for seamless blending"""
         mask = Image.new('L', (width, height), 255)
         
-        # Apply Gaussian blur to the entire mask if specified
+        left_pad, top_pad, right_pad, bottom_pad = padding_info
+        
         if blur_radius > 0:
-            from PIL import ImageFilter
-            mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+            # Use numpy for more efficient and smoother mask creation
+            mask_array = np.full((height, width), 255, dtype=np.uint8)
+            
+            # Create distance-based feathering for smoother transitions
+            for y in range(height):
+                for x in range(width):
+                    distances = []
+                    
+                    # Calculate distance to edges that should be feathered
+                    if left_pad > 0:
+                        distances.append(x)
+                    if right_pad > 0:
+                        distances.append(width - x - 1)
+                    if top_pad > 0:
+                        distances.append(y)
+                    if bottom_pad > 0:
+                        distances.append(height - y - 1)
+                    
+                    if distances:
+                        min_dist = min(distances)
+                        if min_dist < blur_radius:
+                            # Smooth falloff using cosine function for better blending
+                            fade_factor = (1 + np.cos(np.pi * (blur_radius - min_dist) / blur_radius)) / 2
+                            mask_array[y, x] = int(255 * fade_factor)
+            
+            mask = Image.fromarray(mask_array)
                             
         return mask
 
     def _seam_fix(self, image, original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding, seam_fix_mask_blur, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mode, progress):
         if seam_fix_mode == "Simple" or seam_fix_mode == "Advanced":
             seam_tiles = self._generate_seam_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
-            image = self._process_and_stitch(seam_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress)
+            image = self._process_and_stitch(seam_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress, base_image=image)
 
         if seam_fix_mode == "Advanced":
             intersection_tiles = self._generate_intersection_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
-            image = self._process_and_stitch(intersection_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress)
+            image = self._process_and_stitch(intersection_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress, base_image=image)
             
         return image
 
