@@ -2,6 +2,8 @@
 
 A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and detail-preserving stitching.
 
+WARNING: This is not magic - although it sometimes seems that way. It makes errors. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler process I tested. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
+
 ## Features
 
 - **Zero-Blur Detail Preservation**: Pixel-perfect averaging mode that preserves fine details
@@ -9,7 +11,6 @@ A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models 
 - **Memory Optimized**: Prevents OOM errors using configurable tile-based upscaling
 - **SeedVR2 Integration**: Works with all SeedVR2 model variants (3B/7B, FP16/FP8, Sharp versions)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
-- **Progress Tracking**: ComfyUI UI progress bar with detailed console output
 
 ## Installation
 
