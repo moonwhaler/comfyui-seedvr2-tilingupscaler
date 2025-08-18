@@ -96,10 +96,10 @@ class UltimateSeedVR2Upscaler:
         main_tiles = self._generate_tiles(image, tile_width, tile_height, 0, "Linear")
         total = len(main_tiles)
         if seam_fix_mode != "Disabled":
-            seam_tiles = self._generate_seam_tiles(image, tile_width, tile_height, seam_fix_width, 0)
+            seam_tiles = self._generate_targeted_seam_tiles(image, tile_width, tile_height, seam_fix_width, 0)
             total += len(seam_tiles)
             if seam_fix_mode == "Advanced":
-                intersection_tiles = self._generate_intersection_tiles(image, tile_width, tile_height, seam_fix_width, 0)
+                intersection_tiles = self._generate_targeted_intersection_tiles(image, tile_width, tile_height, seam_fix_width, 0)
                 total += len(intersection_tiles)
         return total
 
@@ -320,52 +320,94 @@ class UltimateSeedVR2Upscaler:
         return output_image
 
     def _create_precise_tile_mask(self, width, height, blur_radius, padding_info):
-        """Create precise edge-only blending mask that preserves maximum detail"""
+        """Create smart blending mask - zero blur interior, minimal blur at seams"""
         left_pad, top_pad, right_pad, bottom_pad = padding_info
         mask_array = np.full((height, width), 255, dtype=np.uint8)
         
-        # Only apply blur if specified
+        # Smart blend: Use minimal blur only where absolutely needed
         if blur_radius > 0:
-            # Create precise gradients only in overlap zones
+            # Effective blur - never more than 3 pixels for seam hiding
+            effective_blur = min(blur_radius, 3)
+            
             for y in range(height):
                 for x in range(width):
                     min_alpha = 255
                     
-                    # Left edge overlap
-                    if left_pad > 0 and x < blur_radius:
-                        min_alpha = min(min_alpha, int(255 * (x / blur_radius)))
+                    # Apply gradient only at tile boundaries
+                    if left_pad > 0 and x < effective_blur:
+                        min_alpha = min(min_alpha, int(255 * (x / effective_blur)))
                     
-                    # Right edge overlap  
-                    if right_pad > 0 and x >= width - blur_radius:
-                        min_alpha = min(min_alpha, int(255 * ((width - x - 1) / blur_radius)))
+                    if right_pad > 0 and x >= width - effective_blur:
+                        min_alpha = min(min_alpha, int(255 * ((width - x - 1) / effective_blur)))
                     
-                    # Top edge overlap
-                    if top_pad > 0 and y < blur_radius:
-                        min_alpha = min(min_alpha, int(255 * (y / blur_radius)))
+                    if top_pad > 0 and y < effective_blur:
+                        min_alpha = min(min_alpha, int(255 * (y / effective_blur)))
                     
-                    # Bottom edge overlap
-                    if bottom_pad > 0 and y >= height - blur_radius:
-                        min_alpha = min(min_alpha, int(255 * ((height - y - 1) / blur_radius)))
+                    if bottom_pad > 0 and y >= height - effective_blur:
+                        min_alpha = min(min_alpha, int(255 * ((height - y - 1) / effective_blur)))
                     
                     mask_array[y, x] = min_alpha
         
         return Image.fromarray(mask_array)
 
     def _seam_fix(self, image, original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding, seam_fix_mask_blur, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mode, progress):
-        # Process seam areas to eliminate artifacts while preserving details
+        # Enhanced seam fix for minimal blur scenarios
         if seam_fix_mode == "Simple" or seam_fix_mode == "Advanced":
-            print(f"Processing {seam_fix_mode.lower()} seam fix with detail preservation...")
-            seam_tiles = self._generate_seam_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
-            # Use exact user-specified blur for seam fix - no forced minimum
-            image = self._process_and_stitch(seam_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress, base_image=image)
+            print(f"Processing {seam_fix_mode.lower()} seam fix with intelligent seam targeting...")
+            seam_tiles = self._generate_targeted_seam_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
+            # Use smart blur for seam fix - minimal blur for detail preservation
+            seam_blur = max(seam_fix_mask_blur, 2) if seam_fix_mask_blur > 0 else 2
+            image = self._process_and_stitch(seam_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_blur, progress, base_image=image)
 
         if seam_fix_mode == "Advanced":
-            print("Processing intersection seam fix with detail preservation...")
-            intersection_tiles = self._generate_intersection_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
-            # Use exact user-specified blur for intersection fix - no forced minimum
-            image = self._process_and_stitch(intersection_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress, base_image=image)
+            print("Processing intersection seam fix with targeted blending...")
+            intersection_tiles = self._generate_targeted_intersection_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
+            seam_blur = max(seam_fix_mask_blur, 2) if seam_fix_mask_blur > 0 else 2
+            image = self._process_and_stitch(intersection_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_blur, progress, base_image=image)
             
         return image
+
+    def _generate_targeted_seam_tiles(self, image, tile_width, tile_height, seam_width, padding):
+        """Generate seam tiles with better targeting of actual seam locations"""
+        width, height = image.size
+        tiles = []
+        
+        # Narrow seam width for precision - use smaller strips for better targeting
+        effective_seam_width = max(seam_width // 2, 32)  # Minimum 32 pixels for context
+        
+        # Horizontal seams - target exact tile boundaries
+        for y in range(tile_height, height, tile_height):
+            for x in range(0, width, tile_width):
+                # Center seam exactly on tile boundary
+                seam_y = y - effective_seam_width // 2
+                tiles.append(self._get_tile_info(image, x, seam_y, tile_width, effective_seam_width, padding))
+        
+        # Vertical seams - target exact tile boundaries
+        for x in range(tile_width, width, tile_width):
+            for y in range(0, height, tile_height):
+                # Center seam exactly on tile boundary
+                seam_x = x - effective_seam_width // 2
+                tiles.append(self._get_tile_info(image, seam_x, y, effective_seam_width, tile_height, padding))
+        
+        return tiles
+
+    def _generate_targeted_intersection_tiles(self, image, tile_width, tile_height, seam_width, padding):
+        """Generate intersection tiles with precise targeting"""
+        width, height = image.size
+        tiles = []
+        
+        # Smaller intersection areas for precision
+        effective_seam_width = max(seam_width // 2, 32)
+        
+        # Intersection points where seams cross
+        for y in range(tile_height, height, tile_height):
+            for x in range(tile_width, width, tile_width):
+                # Center intersection exactly on tile boundaries
+                intersection_x = x - effective_seam_width // 2
+                intersection_y = y - effective_seam_width // 2
+                tiles.append(self._get_tile_info(image, intersection_x, intersection_y, effective_seam_width, effective_seam_width, padding))
+        
+        return tiles
 
     def _generate_seam_tiles(self, image, tile_width, tile_height, seam_width, padding):
         width, height = image.size
