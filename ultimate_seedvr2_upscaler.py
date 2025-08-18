@@ -7,10 +7,17 @@ class Progress:
     def __init__(self, total_steps):
         self.total_steps = total_steps
         self.current_step = 0
+        print(f"\n🔄 Starting upscale process - {total_steps} tiles to process\n" + "="*50)
 
     def update(self):
         self.current_step += 1
-        print(f"Processing step {self.current_step}/{self.total_steps}...")
+        percentage = (self.current_step / self.total_steps) * 100
+        progress_bar = "█" * int(percentage // 5) + "░" * (20 - int(percentage // 5))
+        
+        print(f"\n🎯 Processing tile {self.current_step}/{self.total_steps} [{progress_bar}] {percentage:.1f}%\n")
+        
+        if self.current_step == self.total_steps:
+            print("="*50 + f"\n✅ Upscale completed successfully! Processed {self.total_steps} tiles\n")
 
 def tensor_to_pil(tensor):
     image_np = tensor.squeeze().mul(255).clamp(0, 255).byte().numpy()
@@ -45,11 +52,6 @@ class UltimateSeedVR2Upscaler:
                 "tile_padding": ("INT", {"default": 32, "min": 0, "max": 8192, "step": 8}),
                 "tile_upscale_resolution": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
                 "tiling_strategy": (["Chess", "Linear"],),
-                "seam_fix_mode": (["Disabled", "Simple", "Advanced"],),
-                "seam_fix_denoise": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "seam_fix_width": ("INT", {"default": 64, "min": 0, "max": 8192, "step": 8}),
-                "seam_fix_mask_blur": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
-                "seam_fix_padding": ("INT", {"default": 16, "min": 0, "max": 8192, "step": 8}),
             },
             "optional": {
                 "block_swap_config": ("block_swap_config",),
@@ -60,7 +62,7 @@ class UltimateSeedVR2Upscaler:
     FUNCTION = "upscale"
     CATEGORY = "image/upscaling"
 
-    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, seam_fix_mode, seam_fix_denoise, seam_fix_width, seam_fix_mask_blur, seam_fix_padding, block_swap_config=None):
+    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, block_swap_config=None):
         # Setup
         seedvr2_instance = self._get_seedvr2_instance()
         pil_image = tensor_to_pil(image)
@@ -69,20 +71,14 @@ class UltimateSeedVR2Upscaler:
         output_height = int(pil_image.height * upscale_factor)
 
         # Progress tracking
-        total_steps = self._calculate_total_steps(pil_image, tile_width, tile_height, seam_fix_mode, seam_fix_width)
-        progress = Progress(total_steps)
+        main_tiles = self._generate_tiles(pil_image, tile_width, tile_height, tile_padding, tiling_strategy)
+        progress = Progress(len(main_tiles))
 
         # Store original image for base creation
         self._original_image = pil_image
         
         # Main upscale pass with detail-preserving stitching
-        main_tiles = self._generate_tiles(pil_image, tile_width, tile_height, tile_padding, tiling_strategy)
         output_image = self._process_and_stitch(main_tiles, output_width, output_height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress)
-
-        # Seam fix pass - eliminate remaining artifacts with user-controlled blur
-        if seam_fix_mode != "Disabled":
-            print("Applying seam fix to eliminate remaining artifacts...")
-            output_image = self._seam_fix(output_image, pil_image, tile_width, tile_height, seam_fix_width, seam_fix_padding, seam_fix_mask_blur, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mode, progress)
 
         return (pil_to_tensor(output_image),)
 
@@ -91,17 +87,6 @@ class UltimateSeedVR2Upscaler:
             if node_class.__name__ == "SeedVR2":
                 return node_class()
         raise RuntimeError("Could not find SeedVR2 node. Make sure it is installed correctly.")
-
-    def _calculate_total_steps(self, image, tile_width, tile_height, seam_fix_mode, seam_fix_width):
-        main_tiles = self._generate_tiles(image, tile_width, tile_height, 0, "Linear")
-        total = len(main_tiles)
-        if seam_fix_mode != "Disabled":
-            seam_tiles = self._generate_targeted_seam_tiles(image, tile_width, tile_height, seam_fix_width, 0)
-            total += len(seam_tiles)
-            if seam_fix_mode == "Advanced":
-                intersection_tiles = self._generate_targeted_intersection_tiles(image, tile_width, tile_height, seam_fix_width, 0)
-                total += len(intersection_tiles)
-        return total
 
     def _generate_tiles(self, image, tile_width, tile_height, padding, strategy):
         width, height = image.size
@@ -349,90 +334,6 @@ class UltimateSeedVR2Upscaler:
                     mask_array[y, x] = min_alpha
         
         return Image.fromarray(mask_array)
-
-    def _seam_fix(self, image, original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding, seam_fix_mask_blur, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mode, progress):
-        # Enhanced seam fix for minimal blur scenarios
-        if seam_fix_mode == "Simple" or seam_fix_mode == "Advanced":
-            print(f"Processing {seam_fix_mode.lower()} seam fix with intelligent seam targeting...")
-            seam_tiles = self._generate_targeted_seam_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
-            # Use smart blur for seam fix - minimal blur for detail preservation
-            seam_blur = max(seam_fix_mask_blur, 2) if seam_fix_mask_blur > 0 else 2
-            image = self._process_and_stitch(seam_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_blur, progress, base_image=image)
-
-        if seam_fix_mode == "Advanced":
-            print("Processing intersection seam fix with targeted blending...")
-            intersection_tiles = self._generate_targeted_intersection_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
-            seam_blur = max(seam_fix_mask_blur, 2) if seam_fix_mask_blur > 0 else 2
-            image = self._process_and_stitch(intersection_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_blur, progress, base_image=image)
-            
-        return image
-
-    def _generate_targeted_seam_tiles(self, image, tile_width, tile_height, seam_width, padding):
-        """Generate seam tiles with better targeting of actual seam locations"""
-        width, height = image.size
-        tiles = []
-        
-        # Narrow seam width for precision - use smaller strips for better targeting
-        effective_seam_width = max(seam_width // 2, 32)  # Minimum 32 pixels for context
-        
-        # Horizontal seams - target exact tile boundaries
-        for y in range(tile_height, height, tile_height):
-            for x in range(0, width, tile_width):
-                # Center seam exactly on tile boundary
-                seam_y = y - effective_seam_width // 2
-                tiles.append(self._get_tile_info(image, x, seam_y, tile_width, effective_seam_width, padding))
-        
-        # Vertical seams - target exact tile boundaries
-        for x in range(tile_width, width, tile_width):
-            for y in range(0, height, tile_height):
-                # Center seam exactly on tile boundary
-                seam_x = x - effective_seam_width // 2
-                tiles.append(self._get_tile_info(image, seam_x, y, effective_seam_width, tile_height, padding))
-        
-        return tiles
-
-    def _generate_targeted_intersection_tiles(self, image, tile_width, tile_height, seam_width, padding):
-        """Generate intersection tiles with precise targeting"""
-        width, height = image.size
-        tiles = []
-        
-        # Smaller intersection areas for precision
-        effective_seam_width = max(seam_width // 2, 32)
-        
-        # Intersection points where seams cross
-        for y in range(tile_height, height, tile_height):
-            for x in range(tile_width, width, tile_width):
-                # Center intersection exactly on tile boundaries
-                intersection_x = x - effective_seam_width // 2
-                intersection_y = y - effective_seam_width // 2
-                tiles.append(self._get_tile_info(image, intersection_x, intersection_y, effective_seam_width, effective_seam_width, padding))
-        
-        return tiles
-
-    def _generate_seam_tiles(self, image, tile_width, tile_height, seam_width, padding):
-        width, height = image.size
-        tiles = []
-        
-        # Horizontal seams
-        for y in range(tile_height, height, tile_height):
-            for x in range(0, width, tile_width):
-                tiles.append(self._get_tile_info(image, x, y - seam_width // 2, tile_width, seam_width, padding))
-        
-        # Vertical seams        
-        for x in range(tile_width, width, tile_width):
-            for y in range(0, height, tile_height):
-                tiles.append(self._get_tile_info(image, x - seam_width // 2, y, seam_width, tile_height, padding))
-        return tiles
-
-    def _generate_intersection_tiles(self, image, tile_width, tile_height, seam_width, padding):
-        width, height = image.size
-        tiles = []
-        
-        # Intersection points where horizontal and vertical seams meet
-        for y in range(tile_height, height, tile_height):
-            for x in range(tile_width, width, tile_width):
-                tiles.append(self._get_tile_info(image, x - seam_width // 2, y - seam_width // 2, seam_width, seam_width, padding))
-        return tiles
 
 NODE_CLASS_MAPPINGS = {
     "UltimateSeedVR2Upscaler": UltimateSeedVR2Upscaler

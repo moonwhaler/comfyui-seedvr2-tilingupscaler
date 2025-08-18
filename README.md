@@ -1,15 +1,16 @@
 # Ultimate SeedVR2 Upscaler
 
-A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and seamless stitching.
+A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and detail-preserving stitching.
 
 ## Features
 
+- **Zero-Blur Detail Preservation**: Revolutionary pixel-perfect averaging mode that preserves 100% of fine details (skin pores, textures)
+- **Smart Blending System**: Intelligent masking that applies minimal blur only where needed for seamless results
 - **Memory Optimized**: Prevents OOM errors by using configurable tile-based upscaling
 - **SeedVR2 Integration**: Works with all SeedVR2 model variants (3B/7B, FP16/FP8, Sharp versions)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
-- **Seamless Stitching**: Weight-map based blending with alpha compositing for invisible seams
-- **Seam Fix**: Multi-pass seam correction for perfect image quality
-- **Progress Tracking**: Real-time progress updates during processing
+- **Enhanced Progress Tracking**: Visual progress bars with emojis and percentage completion
+- **Simplified Interface**: Streamlined parameters focusing on what works best
 - **Configurable Target Resolution**: Control memory usage by setting tile upscale resolution
 
 ## Installation
@@ -84,27 +85,41 @@ The node will appear in the `image/upscaling` category as "Ultimate SeedVR2 Upsc
   - **Linear**: Process tiles row by row
   - **Chess**: Process tiles in checkerboard pattern for better blending
 
-### Blending Settings
-- **mask_blur**: Feathering radius for tile edges (default: 16)
-  - Higher values = smoother blending
-  - Lower values = sharper transitions
-
-### Seam Fix (Advanced)
-- **seam_fix_mode**: 
-  - **Disabled**: No seam correction
-  - **Simple**: Process horizontal and vertical seams
-  - **Advanced**: Also process seam intersections
-- **seam_fix_width**: Width of seam areas to reprocess
-- **seam_fix_padding**: Padding for seam tiles
-- **seam_fix_mask_blur**: Blur radius for seam blending
+### Detail Preservation Settings
+- **mask_blur**: Blending control for tile edges (default: 0)
+  - **0**: Zero-blur mode - Maximum detail preservation through pixel averaging
+  - **1-3**: Smart minimal blur - Hides seams while preserving most details
+  - **4+**: Traditional blur - Smoother blending with some detail loss
 
 ## How It Works
 
 1. **Tiling**: The input image is divided into overlapping tiles
 2. **Memory-Safe Upscaling**: Each tile is upscaled using SeedVR2 to a fixed resolution (tile_upscale_resolution)
 3. **Resizing**: Upscaled tiles are resized to their final target dimensions
-4. **Seamless Stitching**: Tiles are blended using alpha compositing with feathered masks
-5. **Seam Correction**: Optional additional passes to eliminate any remaining artifacts
+4. **Detail-Preserving Stitching**: 
+   - **Zero-blur mode (mask_blur=0)**: Uses mathematical pixel averaging for seamless blending without any detail loss
+   - **Smart blur mode (mask_blur>0)**: Applies controlled blur only at tile boundaries with maximum 3-pixel limit
+5. **Enhanced Progress**: Visual progress tracking with bars, percentages, and completion status
+
+## Recommended Settings
+
+### Maximum Detail Preservation
+- **mask_blur**: 0 (zero-blur pixel averaging)
+- **tile_padding**: 32 pixels
+- **tile_upscale_resolution**: Highest your VRAM allows
+- Perfect for: Portraits, detailed textures, fine art
+
+### Balanced Quality & Speed
+- **mask_blur**: 2 (minimal smart blur)
+- **tile_padding**: 32 pixels  
+- **tile_upscale_resolution**: 1024-1536
+- Perfect for: General upscaling, most use cases
+
+### Fast Processing
+- **mask_blur**: 1
+- **tile_padding**: 16 pixels
+- **tiling_strategy**: Linear
+- Perfect for: Quick tests, batch processing
 
 ## Tips for Best Results
 
@@ -114,13 +129,13 @@ The node will appear in the `image/upscaling` category as "Ultimate SeedVR2 Upsc
 - Higher values for maximum quality if you have sufficient VRAM
 
 ### Quality Settings
-- Use `tile_padding` of 32-64 pixels for good overlap
-- Set `mask_blur` to 16-32 for smooth blending
-- Enable seam fix modes for critical quality work
+- **For maximum detail**: Use mask_blur=0 with adequate tile_padding (32+ pixels)
+- **For minimal seams**: Use mask_blur=1-2 for smart blending
+- **Never go above mask_blur=3**: The system automatically caps it to preserve details
 
 ### Performance
 - Linear tiling is faster than Chess
-- Disable seam fix for faster processing when quality is sufficient
+- Zero-blur mode is actually faster since it skips complex blending
 - Use preserve_vram=True if experiencing memory issues
 
 ## Troubleshooting
@@ -131,15 +146,30 @@ The node will appear in the `image/upscaling` category as "Ultimate SeedVR2 Upsc
 - Reduce `tile_width` and `tile_height`
 
 ### Visible Seams
-- Increase `mask_blur`
-- Increase `tile_padding`
-- Enable seam fix modes
+- **First try**: mask_blur=1 or mask_blur=2
+- Increase `tile_padding` to 64 pixels
 - Try Chess tiling strategy
+- **Avoid**: High mask_blur values that destroy details
+
+### Detail Loss
+- **Use mask_blur=0** for zero detail loss
+- Ensure adequate tile_padding (32+ pixels)
+- Increase tile_upscale_resolution if possible
 
 ### Slow Processing
-- Disable seam fix
 - Use Linear tiling
-- Reduce tile overlap (tile_padding)
+- Try mask_blur=0 (faster than complex blending)
+- Reduce tile overlap (tile_padding) if seams aren't visible
+
+## What's New
+
+### v2.0 - Detail Preservation Update
+- ✅ **Zero-Blur Mode**: Preserves 100% of details through pixel-perfect averaging
+- ✅ **Smart Blending**: Intelligent 3-pixel maximum blur for seamless results  
+- ✅ **Simplified Interface**: Removed complex seam fix - mask_blur handles everything
+- ✅ **Enhanced Progress**: Visual progress bars with completion status
+- ✅ **Faster Processing**: Streamlined code without unnecessary complexity
+- ✅ **Better Quality**: Focus on what works best for detail preservation
 
 ## License
 
@@ -148,5 +178,6 @@ This project is licensed under the same terms as the included code dependencies.
 ## Credits
 
 - Based on the Ultimate SD Upscale methodology
-- Adapted for SeedVR2 models
+- Adapted for SeedVR2 models with detail preservation focus
 - Built for ComfyUI ecosystem
+- Enhanced with zero-blur technology for maximum quality
