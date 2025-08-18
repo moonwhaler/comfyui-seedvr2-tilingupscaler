@@ -1,3 +1,5 @@
-from .ultimate_seedvr2_upscaler import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+"""Ultimate SeedVR2 Upscaler - ComfyUI custom node for memory-efficient image upscaling."""
 
-__all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
+from .upscaler import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
