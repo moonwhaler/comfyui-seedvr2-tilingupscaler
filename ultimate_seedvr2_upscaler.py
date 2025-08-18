@@ -3,21 +3,134 @@ import numpy as np
 from PIL import Image
 import nodes
 
+# Import new ComfyUI progress system
+try:
+    from server import PromptServer
+    from comfy_execution.utils import get_executing_context
+    from comfy_execution.progress import get_progress_state
+    WEBSOCKET_PROGRESS_AVAILABLE = True
+except ImportError:
+    WEBSOCKET_PROGRESS_AVAILABLE = False
+    print("WebSocket progress system not available - using console progress only")
+
+# Fallback for older ComfyUI versions
+try:
+    import comfy.utils
+    LEGACY_PROGRESS_AVAILABLE = True
+except ImportError:
+    LEGACY_PROGRESS_AVAILABLE = False
+
 class Progress:
-    def __init__(self, total_steps):
+    def __init__(self, total_steps, sub_steps_per_tile=3):
         self.total_steps = total_steps
+        self.sub_steps_per_tile = sub_steps_per_tile
+        self.total_sub_steps = total_steps * sub_steps_per_tile
         self.current_step = 0
+        self.current_sub_step = 0
+        
+        # Get execution context for WebSocket progress
+        self.context = None
+        self.node_id = None
+        self.prompt_id = None
+        
+        if WEBSOCKET_PROGRESS_AVAILABLE:
+            try:
+                self.context = get_executing_context()
+                if self.context:
+                    self.node_id = self.context.node_id
+                    self.prompt_id = self.context.prompt_id
+            except Exception as e:
+                print(f"Could not get execution context: {e}")
+        
         print(f"\n🔄 Starting upscale process - {total_steps} tiles to process\n" + "="*50)
 
-    def update(self):
-        self.current_step += 1
-        percentage = (self.current_step / self.total_steps) * 100
-        progress_bar = "█" * int(percentage // 5) + "░" * (20 - int(percentage // 5))
+    def _send_websocket_progress(self):
+        """Send progress via WebSocket to ComfyUI UI"""
+        if not WEBSOCKET_PROGRESS_AVAILABLE or not self.node_id:
+            return
+            
+        try:
+            # Update progress state using the new API
+            progress_state = get_progress_state()
+            if progress_state:
+                progress_state.update_progress(
+                    self.node_id, 
+                    self.current_sub_step, 
+                    self.total_sub_steps
+                )
+            
+            # Send progress text message
+            if hasattr(PromptServer, 'instance') and PromptServer.instance:
+                progress_text = f"Tile {self.current_step}/{self.total_steps} • Step {self.current_sub_step}/{self.total_sub_steps}"
+                PromptServer.instance.send_progress_text(progress_text, self.node_id)
+                
+        except Exception as e:
+            print(f"WebSocket progress failed: {e}")
+
+    def update(self, sub_progress_step=None):
+        if sub_progress_step is not None:
+            # Update sub-progress within current tile
+            self.current_sub_step = self.current_step * self.sub_steps_per_tile + sub_progress_step
+        else:
+            # Move to next tile
+            self.current_step += 1
+            self.current_sub_step = self.current_step * self.sub_steps_per_tile
         
-        print(f"\n🎯 Processing tile {self.current_step}/{self.total_steps} [{progress_bar}] {percentage:.1f}%\n")
+        # Calculate percentages
+        main_percentage = (self.current_step / self.total_steps) * 100
+        sub_percentage = (self.current_sub_step / self.total_sub_steps) * 100
+        
+        # Console progress
+        progress_bar = "█" * int(main_percentage // 5) + "░" * (20 - int(main_percentage // 5))
+        print(f"\n🎯 Processing tile {self.current_step}/{self.total_steps} [{progress_bar}] {main_percentage:.1f}%")
+        print(f"   📊 Overall progress: {self.current_sub_step}/{self.total_sub_steps} ({sub_percentage:.1f}%)\n")
+        
+        # WebSocket progress integration (preferred for new ComfyUI)
+        self._send_websocket_progress()
+        
+        # Legacy progress integration (fallback for older ComfyUI)
+        if LEGACY_PROGRESS_AVAILABLE and not WEBSOCKET_PROGRESS_AVAILABLE:
+            try:
+                comfy.utils.report_progress(self.current_sub_step, self.total_sub_steps)
+            except Exception as e:
+                print(f"Note: Legacy progress reporting failed: {e}")
         
         if self.current_step == self.total_steps:
             print("="*50 + f"\n✅ Upscale completed successfully! Processed {self.total_steps} tiles\n")
+
+    def update_sub_progress(self, step_name, step_number):
+        """Update sub-progress for detailed tracking within each tile"""
+        self.current_sub_step = self.current_step * self.sub_steps_per_tile + step_number
+        
+        # Console sub-progress
+        print(f"   ⚙️  {step_name} (Step {step_number}/{self.sub_steps_per_tile})")
+        
+        # WebSocket sub-progress integration
+        if WEBSOCKET_PROGRESS_AVAILABLE and self.node_id:
+            try:
+                # Update progress state
+                progress_state = get_progress_state()
+                if progress_state:
+                    progress_state.update_progress(
+                        self.node_id, 
+                        self.current_sub_step, 
+                        self.total_sub_steps
+                    )
+                
+                # Send detailed progress text
+                if hasattr(PromptServer, 'instance') and PromptServer.instance:
+                    detailed_text = f"Tile {self.current_step}/{self.total_steps} • {step_name} ({step_number}/{self.sub_steps_per_tile})"
+                    PromptServer.instance.send_progress_text(detailed_text, self.node_id)
+                    
+            except Exception as e:
+                pass  # Silent fallback for sub-progress
+        
+        # Legacy sub-progress integration (fallback)
+        elif LEGACY_PROGRESS_AVAILABLE:
+            try:
+                comfy.utils.report_progress(self.current_sub_step, self.total_sub_steps)
+            except Exception as e:
+                pass  # Silent fallback for sub-progress
 
 def tensor_to_pil(tensor):
     image_np = tensor.squeeze().mul(255).clamp(0, 255).byte().numpy()
@@ -44,7 +157,7 @@ class UltimateSeedVR2Upscaler:
                     "default": "seedvr2_ema_3b_fp8_e4m3fn.safetensors"
                 }),
                 "seed": ("INT", {"default": 100, "min": 0, "max": 2**32 - 1, "step": 1}),
-                "new_resolution": ("INT", {"default": 1072, "min": 16, "max": 4320, "step": 16}),
+                "new_resolution": ("INT", {"default": 1072, "min": 16, "max": 16384, "step": 16}),
                 "preserve_vram": ("BOOLEAN", {"default": False}),
                 "tile_width": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
                 "tile_height": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
@@ -63,24 +176,85 @@ class UltimateSeedVR2Upscaler:
     CATEGORY = "image/upscaling"
 
     def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, block_swap_config=None):
-        # Setup
-        seedvr2_instance = self._get_seedvr2_instance()
-        pil_image = tensor_to_pil(image)
-        upscale_factor = new_resolution / max(pil_image.width, pil_image.height)
-        output_width = int(pil_image.width * upscale_factor)
-        output_height = int(pil_image.height * upscale_factor)
+        try:
+            # Get execution context for WebSocket progress
+            context = None
+            node_id = None
+            
+            if WEBSOCKET_PROGRESS_AVAILABLE:
+                try:
+                    context = get_executing_context()
+                    if context:
+                        node_id = context.node_id
+                        
+                        # Initialize progress state
+                        progress_state = get_progress_state()
+                        if progress_state:
+                            progress_state.update_progress(node_id, 0, 100)
+                        
+                        # Send initial status
+                        if hasattr(PromptServer, 'instance') and PromptServer.instance:
+                            PromptServer.instance.send_progress_text("Initializing upscale process...", node_id)
+                            
+                except Exception as e:
+                    print(f"Could not initialize WebSocket progress: {e}")
+            
+            # Setup
+            seedvr2_instance = self._get_seedvr2_instance()
+            pil_image = tensor_to_pil(image)
+            upscale_factor = new_resolution / max(pil_image.width, pil_image.height)
+            output_width = int(pil_image.width * upscale_factor)
+            output_height = int(pil_image.height * upscale_factor)
 
-        # Progress tracking
-        main_tiles = self._generate_tiles(pil_image, tile_width, tile_height, tile_padding, tiling_strategy)
-        progress = Progress(len(main_tiles))
+            # Progress tracking
+            main_tiles = self._generate_tiles(pil_image, tile_width, tile_height, tile_padding, tiling_strategy)
+            progress = Progress(len(main_tiles))
 
-        # Store original image for base creation
-        self._original_image = pil_image
-        
-        # Main upscale pass with detail-preserving stitching
-        output_image = self._process_and_stitch(main_tiles, output_width, output_height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress)
+            # Store original image for base creation
+            self._original_image = pil_image
+            
+            # Main upscale pass with detail-preserving stitching
+            output_image = self._process_and_stitch(main_tiles, output_width, output_height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress)
 
-        return (pil_to_tensor(output_image),)
+            # Final progress report (completion)
+            if WEBSOCKET_PROGRESS_AVAILABLE and node_id:
+                try:
+                    progress_state = get_progress_state()
+                    if progress_state:
+                        progress_state.update_progress(node_id, progress.total_sub_steps, progress.total_sub_steps)
+                    
+                    if hasattr(PromptServer, 'instance') and PromptServer.instance:
+                        PromptServer.instance.send_progress_text("Upscale completed!", node_id)
+                        
+                except Exception as e:
+                    print(f"Could not finalize WebSocket progress: {e}")
+            
+            # Legacy fallback
+            elif LEGACY_PROGRESS_AVAILABLE:
+                try:
+                    comfy.utils.report_progress(progress.total_sub_steps, progress.total_sub_steps)
+                except Exception:
+                    pass
+
+            return (pil_to_tensor(output_image),)
+            
+        except Exception as e:
+            # Ensure progress is completed even on error
+            if WEBSOCKET_PROGRESS_AVAILABLE and 'node_id' in locals() and node_id:
+                try:
+                    if 'progress' in locals():
+                        progress_state = get_progress_state()
+                        if progress_state:
+                            progress_state.update_progress(node_id, progress.total_sub_steps, progress.total_sub_steps)
+                except Exception:
+                    pass
+            elif LEGACY_PROGRESS_AVAILABLE:
+                try:
+                    if 'progress' in locals():
+                        comfy.utils.report_progress(progress.total_sub_steps, progress.total_sub_steps)
+                except Exception:
+                    pass
+            raise e
 
     def _get_seedvr2_instance(self):
         for node_class in nodes.NODE_CLASS_MAPPINGS.values():
@@ -169,14 +343,16 @@ class UltimateSeedVR2Upscaler:
         weight_array = np.zeros((height, width), dtype=np.float64)
         
         # Process all tiles with precise pixel averaging
-        for tile_info in tiles:
-            progress.update()
+        for tile_idx, tile_info in enumerate(tiles):
+            progress.update_sub_progress("AI Upscaling", 1)
             
             # Upscale tile
             tile_tensor = pil_to_tensor(tile_info["tile"])
             upscaled_tile_tuple = seedvr2_instance.execute(images=tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
             ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
+            progress.update_sub_progress("Resizing & Positioning", 2)
+            
             # Resize to final target size
             target_tile_width = int(tile_info["tile"].width * upscale_factor)
             target_tile_height = int(tile_info["tile"].height * upscale_factor)
@@ -203,6 +379,8 @@ class UltimateSeedVR2Upscaler:
             cropped_tile = resized_tile.crop(crop_box)
             tile_array = np.array(cropped_tile, dtype=np.float64)
             
+            progress.update_sub_progress("Seamless Blending", 3)
+            
             # Define the region in the output image
             end_x = min(paste_x + final_tile_width, width)
             end_y = min(paste_y + final_tile_height, height)
@@ -224,6 +402,9 @@ class UltimateSeedVR2Upscaler:
                             output_array[y, x] = tile_array[tile_y, tile_x]
                         
                         weight_array[y, x] = new_weight
+            
+            # Complete this tile
+            progress.update()
         
         # Convert back to PIL Image
         output_array = np.clip(output_array, 0, 255).astype(np.uint8)
@@ -252,14 +433,16 @@ class UltimateSeedVR2Upscaler:
         output_image = base_image.copy()
 
         # Process all tiles with controlled blur blending
-        for tile_info in tiles:
-            progress.update()
+        for tile_idx, tile_info in enumerate(tiles):
+            progress.update_sub_progress("AI Upscaling", 1)
             
             # Upscale tile
             tile_tensor = pil_to_tensor(tile_info["tile"])
             upscaled_tile_tuple = seedvr2_instance.execute(images=tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
             ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
+            progress.update_sub_progress("Resizing & Positioning", 2)
+            
             # Resize to final target size
             target_tile_width = int(tile_info["tile"].width * upscale_factor)
             target_tile_height = int(tile_info["tile"].height * upscale_factor)
@@ -285,6 +468,8 @@ class UltimateSeedVR2Upscaler:
             )
             cropped_tile = resized_tile.crop(crop_box)
             
+            progress.update_sub_progress("Mask Blending", 3)
+            
             # Create mask with user-specified blur - respects exact setting
             tile_mask = self._create_precise_tile_mask(final_tile_width, final_tile_height, mask_blur, tile_info["padding"])
             
@@ -301,6 +486,9 @@ class UltimateSeedVR2Upscaler:
             output_rgba = output_image.convert('RGBA')
             output_rgba.alpha_composite(tile_rgba)
             output_image = output_rgba.convert('RGB')
+            
+            # Complete this tile
+            progress.update()
 
         return output_image
 

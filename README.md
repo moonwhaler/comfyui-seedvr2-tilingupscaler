@@ -9,7 +9,7 @@ A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models 
 - **Memory Optimized**: Prevents OOM errors by using configurable tile-based upscaling
 - **SeedVR2 Integration**: Works with all SeedVR2 model variants (3B/7B, FP16/FP8, Sharp versions)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
-- **Enhanced Progress Tracking**: Visual progress bars with emojis and percentage completion
+- **Enhanced Progress Tracking**: Dual progress system with both ComfyUI UI progress bar and detailed console output
 - **Simplified Interface**: Streamlined parameters focusing on what works best
 - **Configurable Target Resolution**: Control memory usage by setting tile upscale resolution
 
