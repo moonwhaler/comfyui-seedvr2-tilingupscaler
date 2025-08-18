@@ -60,12 +60,16 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
         final_tile_width = int(tile_info["actual_size"][0] * upscale_factor)
         final_tile_height = int(tile_info["actual_size"][1] * upscale_factor)
         
-        # Calculate scaled padding
+        # Calculate scaled padding (both regular and memory padding)
         left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
+        mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
+        
         scaled_left_pad = int(left_pad * upscale_factor)
         scaled_top_pad = int(top_pad * upscale_factor)
+        scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
+        scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
         
-        # Crop the upscaled tile to remove padding
+        # Crop the upscaled tile to remove both regular and memory padding
         crop_box = (
             scaled_left_pad,
             scaled_top_pad,
@@ -151,12 +155,16 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
         final_tile_width = int(tile_info["actual_size"][0] * upscale_factor)
         final_tile_height = int(tile_info["actual_size"][1] * upscale_factor)
         
-        # Calculate scaled padding to crop correctly
+        # Calculate scaled padding to crop correctly (both regular and memory padding)
         left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
+        mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
+        
         scaled_left_pad = int(left_pad * upscale_factor)
         scaled_top_pad = int(top_pad * upscale_factor)
+        scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
+        scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
         
-        # Crop the upscaled tile to remove padding
+        # Crop the upscaled tile to remove both regular and memory padding
         crop_box = (
             scaled_left_pad,
             scaled_top_pad,
