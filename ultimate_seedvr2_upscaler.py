@@ -91,10 +91,11 @@ class UltimateSeedVR2Upscaler:
 
             upscaled_tiles.append({
                 "tile": resized_tile,
-                "position": (int(tile_info["position"][0] * upscale_factor), int(tile_info["position"][1] * upscale_factor))
+                "position": (int(tile_info["position"][0] * upscale_factor), int(tile_info["position"][1] * upscale_factor)),
+                "padding": tile_info["padding"]
             })
 
-        output_image = self._stitch_tiles(upscaled_tiles, output_width, output_height, int(tile_width * upscale_factor), int(tile_height * upscale_factor), int(tile_padding * upscale_factor), mask_blur)
+        output_image = self._stitch_tiles(upscaled_tiles, output_width, output_height, int(tile_padding * upscale_factor), mask_blur, upscale_factor)
 
         return (pil_to_tensor(output_image),)
 
@@ -104,27 +105,42 @@ class UltimateSeedVR2Upscaler:
         for y in range(0, height, tile_height):
             for x in range(0, width, tile_width):
                 box = (x, y, x + tile_width, y + tile_height)
+                
+                left_pad = padding if x > 0 else 0
+                top_pad = padding if y > 0 else 0
+                right_pad = padding if x + tile_width < width else 0
+                bottom_pad = padding if y + tile_height < height else 0
+
                 padded_box = (
-                    max(0, box[0] - padding),
-                    max(0, box[1] - padding),
-                    min(width, box[2] + padding),
-                    min(height, box[3] + padding),
+                    box[0] - left_pad,
+                    box[1] - top_pad,
+                    box[2] + right_pad,
+                    box[3] + bottom_pad,
                 )
                 tile = image.crop(padded_box)
                 tiles.append({
                     "tile": tile,
-                    "position": (x, y)
+                    "position": (x, y),
+                    "padding": (left_pad, top_pad, right_pad, bottom_pad)
                 })
         return tiles
 
-    def _stitch_tiles(self, tiles, width, height, tile_width, tile_height, padding, mask_blur):
+    def _stitch_tiles(self, tiles, width, height, padding, mask_blur, upscale_factor):
         output_image = Image.new('RGB', (width, height))
         for tile_info in tiles:
             tile = tile_info["tile"]
             x, y = tile_info["position"]
+            
+            left_pad, top_pad, right_pad, bottom_pad = [int(p * upscale_factor) for p in tile_info["padding"]]
 
             # Crop the padding from the tile
-            cropped_tile = tile.crop((padding, padding, tile.width - padding, tile.height - padding))
+            crop_box = (
+                left_pad,
+                top_pad,
+                tile.width - right_pad,
+                tile.height - bottom_pad
+            )
+            cropped_tile = tile.crop(crop_box)
 
             # Create a feathered mask for blending
             mask = self._create_feathered_mask(cropped_tile.width, cropped_tile.height, mask_blur)
