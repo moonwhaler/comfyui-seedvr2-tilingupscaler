@@ -3,6 +3,15 @@ import numpy as np
 from PIL import Image
 import nodes
 
+class Progress:
+    def __init__(self, total_steps):
+        self.total_steps = total_steps
+        self.current_step = 0
+
+    def update(self):
+        self.current_step += 1
+        print(f"Processing step {self.current_step}/{self.total_steps}...")
+
 def tensor_to_pil(tensor):
     image_np = tensor.squeeze().mul(255).clamp(0, 255).byte().numpy()
     image = Image.fromarray(image_np, 'RGB')
@@ -35,6 +44,12 @@ class UltimateSeedVR2Upscaler:
                 "mask_blur": ("INT", {"default": 8, "min": 0, "max": 64, "step": 1}),
                 "tile_padding": ("INT", {"default": 32, "min": 0, "max": 8192, "step": 8}),
                 "tile_upscale_resolution": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
+                "tiling_strategy": (["Chess", "Linear"],),
+                "seam_fix_mode": (["Disabled", "Simple", "Advanced"],),
+                "seam_fix_denoise": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "seam_fix_width": ("INT", {"default": 64, "min": 0, "max": 8192, "step": 8}),
+                "seam_fix_mask_blur": ("INT", {"default": 8, "min": 0, "max": 64, "step": 1}),
+                "seam_fix_padding": ("INT", {"default": 16, "min": 0, "max": 8192, "step": 8}),
             },
             "optional": {
                 "block_swap_config": ("block_swap_config",),
@@ -45,128 +60,228 @@ class UltimateSeedVR2Upscaler:
     FUNCTION = "upscale"
     CATEGORY = "image/upscaling"
 
-    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, block_swap_config=None):
-        # Find the SeedVR2 node class dynamically
-        seedvr2_class = None
-        for node_class in nodes.NODE_CLASS_MAPPINGS.values():
-            if node_class.__name__ == "SeedVR2":
-                seedvr2_class = node_class
-                break
-        
-        if not seedvr2_class:
-            raise RuntimeError("Could not find SeedVR2 node. Make sure it is installed correctly.")
-
-        seedvr2_instance = seedvr2_class()
-
+    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, seam_fix_mode, seam_fix_denoise, seam_fix_width, seam_fix_mask_blur, seam_fix_padding, block_swap_config=None):
+        # Setup
+        seedvr2_instance = self._get_seedvr2_instance()
         pil_image = tensor_to_pil(image)
-
         upscale_factor = new_resolution / max(pil_image.width, pil_image.height)
         output_width = int(pil_image.width * upscale_factor)
         output_height = int(pil_image.height * upscale_factor)
 
-        tiles = self._tile_image(pil_image, tile_width, tile_height, tile_padding)
-        
-        upscaled_tiles = []
-        for tile_info in tiles:
-            tile_tensor = pil_to_tensor(tile_info["tile"])
+        # Progress tracking
+        total_steps = self._calculate_total_steps(pil_image, tile_width, tile_height, seam_fix_mode, seam_fix_width)
+        progress = Progress(total_steps)
 
-            # Stage 1: AI upscale to the fixed tile resolution
-            upscaled_tile_tuple = seedvr2_instance.execute(
-                images=tile_tensor,
-                model=model,
-                seed=seed,
-                new_resolution=tile_upscale_resolution,
-                batch_size=1,
-                preserve_vram=preserve_vram,
-                block_swap_config=block_swap_config
-            )
-            
-            ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
+        # Main upscale pass
+        main_tiles = self._generate_tiles(pil_image, tile_width, tile_height, tile_padding, tiling_strategy)
+        output_image = self._process_and_stitch(main_tiles, output_width, output_height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress)
 
-            # Stage 2: Resize the AI upscaled tile to its final target size
-            target_tile_width = int(tile_info["tile"].width * upscale_factor)
-            target_tile_height = int(tile_info["tile"].height * upscale_factor)
-            
-            resized_tile = ai_upscaled_tile.resize((target_tile_width, target_tile_height), Image.LANCZOS)
-
-            upscaled_tiles.append({
-                "tile": resized_tile,
-                "position": (int(tile_info["position"][0] * upscale_factor), int(tile_info["position"][1] * upscale_factor)),
-                "padding": tile_info["padding"]
-            })
-
-        output_image = self._stitch_tiles(upscaled_tiles, output_width, output_height, int(tile_padding * upscale_factor), mask_blur, upscale_factor)
+        # Seam fix pass
+        if seam_fix_mode != "Disabled":
+            output_image = self._seam_fix(output_image, pil_image, tile_width, tile_height, seam_fix_width, seam_fix_padding, seam_fix_mask_blur, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mode, progress)
 
         return (pil_to_tensor(output_image),)
 
-    def _tile_image(self, image, tile_width, tile_height, padding):
+    def _get_seedvr2_instance(self):
+        for node_class in nodes.NODE_CLASS_MAPPINGS.values():
+            if node_class.__name__ == "SeedVR2":
+                return node_class()
+        raise RuntimeError("Could not find SeedVR2 node. Make sure it is installed correctly.")
+
+    def _calculate_total_steps(self, image, tile_width, tile_height, seam_fix_mode, seam_fix_width):
+        main_tiles = self._generate_tiles(image, tile_width, tile_height, 0, "Linear")
+        total = len(main_tiles)
+        if seam_fix_mode != "Disabled":
+            seam_tiles = self._generate_seam_tiles(image, tile_width, tile_height, seam_fix_width, 0)
+            total += len(seam_tiles)
+            if seam_fix_mode == "Advanced":
+                intersection_tiles = self._generate_intersection_tiles(image, tile_width, tile_height, seam_fix_width, 0)
+                total += len(intersection_tiles)
+        return total
+
+    def _generate_tiles(self, image, tile_width, tile_height, padding, strategy):
         width, height = image.size
         tiles = []
-        for y in range(0, height, tile_height):
-            for x in range(0, width, tile_width):
-                box = (x, y, x + tile_width, y + tile_height)
-                
-                left_pad = padding if x > 0 else 0
-                top_pad = padding if y > 0 else 0
-                right_pad = padding if x + tile_width < width else 0
-                bottom_pad = padding if y + tile_height < height else 0
-
-                padded_box = (
-                    box[0] - left_pad,
-                    box[1] - top_pad,
-                    box[2] + right_pad,
-                    box[3] + bottom_pad,
-                )
-                tile = image.crop(padded_box)
-                tiles.append({
-                    "tile": tile,
-                    "position": (x, y),
-                    "padding": (left_pad, top_pad, right_pad, bottom_pad)
-                })
+        
+        if strategy == "Linear":
+            for y in range(0, height, tile_height):
+                for x in range(0, width, tile_width):
+                    tiles.append(self._get_tile_info(image, x, y, tile_width, tile_height, padding))
+        elif strategy == "Chess":
+            for y_idx, y in enumerate(range(0, height, tile_height)):
+                for x_idx, x in enumerate(range(0, width, tile_width)):
+                    if (x_idx + y_idx) % 2 == 0:
+                        tiles.append(self._get_tile_info(image, x, y, tile_width, tile_height, padding))
+            for y_idx, y in enumerate(range(0, height, tile_height)):
+                for x_idx, x in enumerate(range(0, width, tile_width)):
+                    if (x_idx + y_idx) % 2 != 0:
+                        tiles.append(self._get_tile_info(image, x, y, tile_width, tile_height, padding))
         return tiles
 
-    def _stitch_tiles(self, tiles, width, height, padding, mask_blur, upscale_factor):
-        output_image = Image.new('RGB', (width, height))
+    def _get_tile_info(self, image, x, y, tile_width, tile_height, padding):
+        width, height = image.size
+        
+        # Calculate actual tile boundaries (may be smaller at edges)
+        actual_tile_width = min(tile_width, width - x)
+        actual_tile_height = min(tile_height, height - y)
+        
+        # Calculate padding (only add padding where there are adjacent tiles)
+        left_pad = padding if x > 0 else 0
+        top_pad = padding if y > 0 else 0
+        right_pad = padding if x + tile_width < width else 0
+        bottom_pad = padding if y + tile_height < height else 0
+
+        # Create the padded crop box
+        padded_box = (
+            max(0, x - left_pad),
+            max(0, y - top_pad),
+            min(width, x + actual_tile_width + right_pad),
+            min(height, y + actual_tile_height + bottom_pad),
+        )
+        
+        tile = image.crop(padded_box)
+        return {
+            "tile": tile,
+            "position": (x, y),
+            "actual_size": (actual_tile_width, actual_tile_height),
+            "padding": (left_pad, top_pad, right_pad, bottom_pad),
+        }
+
+    def _process_and_stitch(self, tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress):
+        # Start with the first processed tile as the base image
+        if not tiles:
+            return Image.new('RGB', (width, height), (0, 0, 0))
+        
+        # Process the first tile to get the base image
+        first_tile = tiles[0]
+        progress.update()
+        
+        first_tile_tensor = pil_to_tensor(first_tile["tile"])
+        first_upscaled_tuple = seedvr2_instance.execute(images=first_tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
+        first_ai_upscaled = tensor_to_pil(first_upscaled_tuple[0])
+        
+        target_tile_width = int(first_tile["tile"].width * upscale_factor)
+        target_tile_height = int(first_tile["tile"].height * upscale_factor)
+        first_resized = first_ai_upscaled.resize((target_tile_width, target_tile_height), Image.LANCZOS)
+        
+        # Create base image by upscaling the original with simple resize first
+        base_image = first_tile["tile"].resize((width, height), Image.LANCZOS)
+        output_image = base_image.copy()
+
+        # Now process all tiles (including the first one again)
         for tile_info in tiles:
-            tile = tile_info["tile"]
-            x, y = tile_info["position"]
+            progress.update()
             
-            left_pad, top_pad, right_pad, bottom_pad = [int(p * upscale_factor) for p in tile_info["padding"]]
+            # Upscale tile
+            tile_tensor = pil_to_tensor(tile_info["tile"])
+            upscaled_tile_tuple = seedvr2_instance.execute(images=tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
+            ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
-            # Crop the padding from the tile
+            # Resize to final target size
+            target_tile_width = int(tile_info["tile"].width * upscale_factor)
+            target_tile_height = int(tile_info["tile"].height * upscale_factor)
+            resized_tile = ai_upscaled_tile.resize((target_tile_width, target_tile_height), Image.LANCZOS)
+            
+            # Calculate the region this tile covers (without padding)
+            paste_x = int(tile_info["position"][0] * upscale_factor)
+            paste_y = int(tile_info["position"][1] * upscale_factor)
+            final_tile_width = int(tile_info["actual_size"][0] * upscale_factor)
+            final_tile_height = int(tile_info["actual_size"][1] * upscale_factor)
+            
+            # Calculate scaled padding to crop correctly
+            left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
+            scaled_left_pad = int(left_pad * upscale_factor)
+            scaled_top_pad = int(top_pad * upscale_factor)
+            
+            # Crop the upscaled tile to remove padding
             crop_box = (
-                left_pad,
-                top_pad,
-                tile.width - right_pad,
-                tile.height - bottom_pad
+                scaled_left_pad,
+                scaled_top_pad,
+                scaled_left_pad + final_tile_width,
+                scaled_top_pad + final_tile_height
             )
-            cropped_tile = tile.crop(crop_box)
+            cropped_tile = resized_tile.crop(crop_box)
+            
+            # Create a simple rectangular mask for this tile region
+            tile_mask = Image.new('L', (final_tile_width, final_tile_height), 255)
+            
+            # Apply Gaussian blur to the mask if specified (following UltimateSDUpscale)
+            if mask_blur > 0:
+                from PIL import ImageFilter
+                tile_mask = tile_mask.filter(ImageFilter.GaussianBlur(mask_blur))
+            
+            # Create RGBA version of the tile for compositing
+            tile_rgba = Image.new('RGBA', output_image.size, (0, 0, 0, 0))
+            tile_rgba.paste(cropped_tile, (paste_x, paste_y))
+            
+            # Create full-size mask
+            full_mask = Image.new('L', output_image.size, 0)
+            full_mask.paste(tile_mask, (paste_x, paste_y))
+            tile_rgba.putalpha(full_mask)
+            
+            # Alpha composite onto the output image
+            output_rgba = output_image.convert('RGBA')
+            output_rgba.alpha_composite(tile_rgba)
+            output_image = output_rgba.convert('RGB')
 
-            # Create a feathered mask for blending
-            mask = self._create_feathered_mask(cropped_tile.width, cropped_tile.height, mask_blur)
-            
-            output_image.paste(cropped_tile, (x, y), mask)
-            
         return output_image
 
-    def _create_feathered_mask(self, width, height, blur_radius):
+    def _create_tile_mask(self, width, height, blur_radius, padding_info, upscale_factor):
+        """Create a simple rectangular mask with Gaussian blur"""
         mask = Image.new('L', (width, height), 255)
         
-        # Create a feathered edge on all four sides
-        for i in range(blur_radius):
-            alpha = int(255 * (i / blur_radius))
-            
-            # Top and bottom edges
-            for x in range(width):
-                mask.putpixel((x, i), alpha)
-                mask.putpixel((x, height - 1 - i), alpha)
-                
-            # Left and right edges
-            for y in range(height):
-                mask.putpixel((i, y), alpha)
-                mask.putpixel((width - 1 - i, y), alpha)
-                
+        # Apply Gaussian blur to the entire mask if specified
+        if blur_radius > 0:
+            from PIL import ImageFilter
+            mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+                            
         return mask
+
+    def _seam_fix(self, image, original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding, seam_fix_mask_blur, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mode, progress):
+        if seam_fix_mode == "Simple" or seam_fix_mode == "Advanced":
+            seam_tiles = self._generate_seam_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
+            image = self._process_and_stitch(seam_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress)
+
+        if seam_fix_mode == "Advanced":
+            intersection_tiles = self._generate_intersection_tiles(original_image, tile_width, tile_height, seam_fix_width, seam_fix_padding)
+            image = self._process_and_stitch(intersection_tiles, image.width, image.height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, seam_fix_mask_blur, progress)
+            
+        return image
+
+    def _generate_seam_tiles(self, image, tile_width, tile_height, seam_width, padding):
+        width, height = image.size
+        tiles = []
+        
+        for y in range(tile_height, height, tile_height):
+            for x in range(0, width, tile_width):
+                tiles.append(self._get_tile_info(image, x, y - seam_width // 2, tile_width, seam_width, padding))
+                
+        for x in range(tile_width, width, tile_width):
+            for y in range(0, height, tile_height):
+                tiles.append(self._get_tile_info(image, x - seam_width // 2, y, seam_width, tile_height, padding))
+        return tiles
+
+    def _generate_intersection_tiles(self, image, tile_width, tile_height, seam_width, padding):
+        width, height = image.size
+        tiles = []
+        
+        for y in range(tile_height, height, tile_height):
+            for x in range(tile_width, width, tile_width):
+                tiles.append(self._get_tile_info(image, x - seam_width // 2, y - seam_width // 2, seam_width, seam_width, padding))
+        return tiles
+
+    def _create_linear_mask(self, width, height, blur_radius):
+        mask = np.ones((height, width), dtype=np.float32)
+        
+        if blur_radius > 0:
+            for i in range(blur_radius):
+                fade = i / blur_radius
+                mask[i, :] *= fade
+                mask[-i-1, :] *= fade
+                mask[:, i] *= fade
+                mask[:, -i-1] *= fade
+                
+        return Image.fromarray((mask * 255).astype(np.uint8))
 
 NODE_CLASS_MAPPINGS = {
     "UltimateSeedVR2Upscaler": UltimateSeedVR2Upscaler
