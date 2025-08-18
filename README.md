@@ -90,7 +90,7 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 ## Requirements
 
 ### System Requirements
-- Python 3.8+
+- Python 3.10+
 - CUDA-capable GPU (recommended)
 - Sufficient RAM/VRAM for chosen tile upscale resolution
 
