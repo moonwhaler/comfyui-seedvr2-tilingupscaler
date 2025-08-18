@@ -27,10 +27,41 @@ git clone https://github.com/moonwhaler/UltimateResupscaler.git
 ```
 
 2. Install dependencies:
+
+**IMPORTANT**: The requirements must be installed in the same Python environment that ComfyUI uses. This is typically a virtual environment (venv) or conda environment.
+
+**For venv users:**
 ```bash
+# Activate your ComfyUI virtual environment first
+source /path/to/your/comfyui/venv/bin/activate  # Linux/Mac
+# OR
+/path/to/your/comfyui/venv/Scripts/activate  # Windows
+
+# Then install requirements
 cd UltimateResupscaler
 pip install -r requirements.txt
 ```
+
+**For conda users:**
+```bash
+# Activate your ComfyUI conda environment first
+conda activate your-comfyui-environment
+
+# Then install requirements
+cd UltimateResupscaler
+pip install -r requirements.txt
+```
+
+**For portable ComfyUI installations:**
+```bash
+# Use the Python executable from your ComfyUI installation
+cd UltimateResupscaler
+/path/to/ComfyUI/python_embeded/python.exe -m pip install -r requirements.txt  # Windows
+# OR
+/path/to/ComfyUI/python/bin/python -m pip install -r requirements.txt  # Linux/Mac
+```
+
+**Note**: Do NOT install these requirements in your system Python or a different environment, as ComfyUI will not be able to find them.
 
 3. Restart ComfyUI
 
