@@ -32,6 +32,7 @@ class SeedVR2TilingUpscaler:
                 "tile_padding": ("INT", {"default": 32, "min": 0, "max": 8192, "step": 8}),
                 "tile_upscale_resolution": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
                 "tiling_strategy": (["Chess", "Linear"],),
+                "anti_aliasing_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
             },
             "optional": {
                 "block_swap_config": ("block_swap_config",),
@@ -42,7 +43,7 @@ class SeedVR2TilingUpscaler:
     FUNCTION = "upscale"
     CATEGORY = "image/upscaling"
 
-    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, block_swap_config=None):
+    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, anti_aliasing_strength, block_swap_config=None):
         try:
             # Initialize progress tracking
             progress = Progress(0)  # Will update with actual count later
@@ -66,7 +67,7 @@ class SeedVR2TilingUpscaler:
             output_image = process_and_stitch(
                 main_tiles, output_width, output_height, seedvr2_instance, model, seed, 
                 tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, 
-                mask_blur, progress
+                mask_blur, progress, anti_aliasing_strength=anti_aliasing_strength
             )
 
             # Finalize progress

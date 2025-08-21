@@ -2,16 +2,67 @@
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
+from scipy.signal import convolve2d
 from .image_utils import tensor_to_pil, pil_to_tensor
 
 
-def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None):
+def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0):
     """Main stitching function that chooses the appropriate method based on blur setting."""
     if mask_blur == 0:
         print("Using zero-blur mode for maximum detail preservation...")
-        return process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image)
+        result = process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image)
     else:
-        return process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image)
+        result = process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image)
+    
+    # Apply anti-aliasing if requested
+    if anti_aliasing_strength > 0:
+        result = apply_edge_aware_antialiasing(result, anti_aliasing_strength)
+    
+    return result
+
+
+def apply_edge_aware_antialiasing(image, strength):
+    """Apply edge-aware anti-aliasing using Sobel edge detection."""
+    # Convert PIL image to numpy array
+    img_array = np.array(image, dtype=np.float64)
+    
+    # Process each color channel
+    smoothed = np.zeros_like(img_array)
+    
+    for channel in range(3):
+        # Extract channel
+        channel_data = img_array[:, :, channel]
+        
+        # Apply Sobel filters to detect edges
+        sobel_x = ndimage.sobel(channel_data, axis=1)
+        sobel_y = ndimage.sobel(channel_data, axis=0)
+        
+        # Calculate edge magnitude
+        edge_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+        
+        # Normalize edge magnitude to 0-1
+        if edge_magnitude.max() > 0:
+            edge_magnitude = edge_magnitude / edge_magnitude.max()
+        
+        # Create inverse edge map (1 where no edges, 0 where strong edges)
+        # This ensures we smooth non-edge areas while preserving edges
+        smoothing_mask = 1.0 - edge_magnitude
+        
+        # Apply adjustable strength
+        smoothing_mask = 1.0 - (smoothing_mask * strength)
+        
+        # Apply Gaussian smoothing
+        # Sigma scales with strength for adaptive smoothing
+        sigma = 0.5 + (strength * 1.5)  # Range from 0.5 to 2.0
+        smoothed_channel = ndimage.gaussian_filter(channel_data, sigma=sigma)
+        
+        # Selective blend: original in edge areas, smoothed in non-edge areas
+        smoothed[:, :, channel] = channel_data * smoothing_mask + smoothed_channel * (1.0 - smoothing_mask)
+    
+    # Convert back to uint8 and PIL Image
+    smoothed = np.clip(smoothed, 0, 255).astype(np.uint8)
+    return Image.fromarray(smoothed)
 
 
 def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image=None):
