@@ -4,10 +4,16 @@ A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models 
 
 WARNING: This is not magic - although it sometimes may seem that way. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler processes I tested so far. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
 
+## Example upscales
+
+![Example upscale 01](./examples/seedvr2_tiling_001.png) 
+![Example upscale 01](./examples/seedvr2_tiling_002.png)
+
 ## Features
 
-- **Zero-Blur Detail Preservation**: Pixel-perfect averaging mode that preserves fine details
-- **Smart Blending System**: Intelligent masking with minimal blur for seamless results
+- **Advanced Multi-Band Blending**: Frequency-separated processing eliminates seams while preserving detail
+- **Content-Aware Stitching**: Adaptive blending based on local image structure and edge strength
+- **Edge-Preserving Smoothing**: Bilateral filtering reduces artifacts without destroying fine details
 - **Memory Optimized**: Prevents OOM errors using configurable tile-based upscaling
 - **SeedVR2 Integration**: Works with all SeedVR2 model variants (3B/7B, FP16/FP8, Sharp versions)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
@@ -17,9 +23,10 @@ WARNING: This is not magic - although it sometimes may seem that way. It will al
 1. Input image is divided into overlapping tiles
 2. Each tile is upscaled using SeedVR2 to a fixed resolution
 3. Upscaled tiles are resized to their final target dimensions
-4. **Detail-Preserving Stitching**: 
-   - **Zero-blur mode**: Mathematical pixel averaging for seamless blending without detail loss
-   - **Smart blur mode**: Controlled blur only at tile boundaries (max 3 pixels)
+4. **Advanced Multi-Band Stitching**: 
+   - **Zero-blur mode**: Frequency-separated blending preserves fine details while eliminating seams
+   - **Content-aware mode**: Structure-adaptive blending with edge-preserving smoothing
+   - **Bilateral filtering**: Reduces artifacts without destroying texture details
 
 ## A personal suggestion
 
@@ -99,6 +106,9 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 - torchvision>=0.10.0
 - numpy>=1.21.0
 - Pillow>=8.0.0
+- scipy>=1.7.0
+- scikit-image>=0.19.0 (optional, for advanced blending)
+- opencv-python>=4.5.0 (optional, for edge-preserving smoothing)
 - SeedVR2 node (installed separately)
 
 ## Usage
@@ -138,20 +148,23 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 
 ## Recommended Settings
 
-### Maximum Detail Preservation
-- **mask_blur**: 0
-- **tile_padding**: 32 pixels
+### Maximum Detail Preservation  
+- **mask_blur**: 0 (multi-band frequency separation)
+- **tile_padding**: 64 pixels (more overlap for better blending)
 - **tile_upscale_resolution**: Highest your VRAM allows
+- **anti_aliasing_strength**: 0.2 (subtle smoothing)
 
 ### Balanced Quality & Speed
-- **mask_blur**: 2
+- **mask_blur**: 2 (content-aware blending with bilateral filtering)
 - **tile_padding**: 32 pixels  
 - **tile_upscale_resolution**: 1024-1536
+- **anti_aliasing_strength**: 0.1
 
 ### Fast Processing
-- **mask_blur**: 1
+- **mask_blur**: 1 (lightweight edge-preserving blend)
 - **tile_padding**: 16 pixels
 - **tiling_strategy**: Linear
+- **anti_aliasing_strength**: 0.0
 
 ## Troubleshooting
 
@@ -162,19 +175,22 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 - Use the "SeedVR2 BlockSwap Config" (from the original SeedVR2 nodes) and attach it to the "block_swap_config" input of the Tiling Upscaler node. Set the "blocks_to_swap" value until you won't get any OOMs anymore. You need RAM for that in return!
 
 ### Visible Seams
-- Try `mask_blur`: 1 or 2
-- Increase `tile_padding` to 64 pixels
-- Use Chess tiling strategy
+- **New solution**: The advanced multi-band blending should eliminate most seams
+- Try `mask_blur`: 1 or 2 for content-aware blending
+- Increase `tile_padding` to 64+ pixels for more overlap
+- Use Chess tiling strategy for better distribution
 
 ### Detail Loss
-- Use `mask_blur`: 0 for zero detail loss
-- Ensure adequate `tile_padding` (32+ pixels)
+- Use `mask_blur`: 0 for multi-band frequency separation (preserves most detail)
+- Ensure adequate `tile_padding` (64+ pixels recommended)
 - Increase `tile_upscale_resolution` if possible
+- Lower `anti_aliasing_strength` or set to 0
 
 ### Slow Processing
 - Use Linear tiling
-- Try `mask_blur`: 0 (faster than complex blending)
+- `mask_blur`: 1 (lightweight processing)
 - Reduce `tile_padding` if seams aren't visible
+- Set `anti_aliasing_strength`: 0
 
 ## Known issues
 
