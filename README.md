@@ -211,6 +211,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## Credits
 
 - Partly based on the Ultimate SD Upscale methodology and adapted to the SeedVR2 process
+- Uses the numz ComfyUI node as base (https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)
 - Adapted for SeedVR2 models with detail preservation focus
 - Built for ComfyUI ecosystem
 - Example image (https://www.flickr.com/photos/160246067@N08/44726249090, public domain license) by TLC Jonhson (https://www.flickr.com/photos/160246067@N08/)
