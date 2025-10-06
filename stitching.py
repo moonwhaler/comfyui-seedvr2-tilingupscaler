@@ -114,35 +114,47 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
         # Calculate scaled padding (both regular and memory padding)
         left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
         mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
-        
+
         scaled_left_pad = int(left_pad * upscale_factor)
         scaled_top_pad = int(top_pad * upscale_factor)
+        scaled_right_pad = int(right_pad * upscale_factor)
+        scaled_bottom_pad = int(bottom_pad * upscale_factor)
         scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
         scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
-        
-        # Crop the upscaled tile to remove both regular and memory padding
+
+        # Keep half the padding on ALL sides to create overlap for blending
+        keep_left = scaled_left_pad // 2 if left_pad > 0 else 0
+        keep_top = scaled_top_pad // 2 if top_pad > 0 else 0
+        keep_right = scaled_right_pad // 2 if right_pad > 0 else 0
+        keep_bottom = scaled_bottom_pad // 2 if bottom_pad > 0 else 0
+
+        # Crop the upscaled tile - keep partial padding on all sides
         crop_box = (
-            scaled_left_pad,
-            scaled_top_pad,
-            scaled_left_pad + final_tile_width,
-            scaled_top_pad + final_tile_height
+            scaled_left_pad - keep_left,
+            scaled_top_pad - keep_top,
+            scaled_left_pad + final_tile_width + keep_right,
+            scaled_top_pad + final_tile_height + keep_bottom
         )
         cropped_tile = resized_tile.crop(crop_box)
         tile_array = np.array(cropped_tile, dtype=np.float64)
-        
+
         progress.update_sub_progress("Seamless Blending", 3)
-        
+
+        # Adjust paste position to account for kept left/top padding
+        paste_x_adjusted = max(0, paste_x - keep_left)
+        paste_y_adjusted = max(0, paste_y - keep_top)
+
         # Define the region in the output image
-        end_x = min(paste_x + final_tile_width, width)
-        end_y = min(paste_y + final_tile_height, height)
-        
+        end_x = min(paste_x_adjusted + tile_array.shape[1], width)
+        end_y = min(paste_y_adjusted + tile_array.shape[0], height)
+
         # Pixel-perfect weighted averaging for seamless blending
-        for y in range(paste_y, end_y):
-            for x in range(paste_x, end_x):
-                tile_x = x - paste_x
-                tile_y = y - paste_y
-                
-                if tile_y < tile_array.shape[0] and tile_x < tile_array.shape[1]:
+        for y in range(paste_y_adjusted, end_y):
+            for x in range(paste_x_adjusted, end_x):
+                tile_x = x - paste_x_adjusted
+                tile_y = y - paste_y_adjusted
+
+                if 0 <= y < height and 0 <= x < width and tile_y < tile_array.shape[0] and tile_x < tile_array.shape[1]:
                     current_weight = weight_array[y, x]
                     new_weight = current_weight + 1.0
                     
@@ -209,33 +221,47 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
         # Calculate scaled padding to crop correctly (both regular and memory padding)
         left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
         mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
-        
+
         scaled_left_pad = int(left_pad * upscale_factor)
         scaled_top_pad = int(top_pad * upscale_factor)
+        scaled_right_pad = int(right_pad * upscale_factor)
+        scaled_bottom_pad = int(bottom_pad * upscale_factor)
         scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
         scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
-        
-        # Crop the upscaled tile to remove both regular and memory padding
+
+        # Keep half the padding on ALL sides to create overlap for blending
+        keep_left = scaled_left_pad // 2 if left_pad > 0 else 0
+        keep_top = scaled_top_pad // 2 if top_pad > 0 else 0
+        keep_right = scaled_right_pad // 2 if right_pad > 0 else 0
+        keep_bottom = scaled_bottom_pad // 2 if bottom_pad > 0 else 0
+
+        # Crop the upscaled tile - keep partial padding on all sides
         crop_box = (
-            scaled_left_pad,
-            scaled_top_pad,
-            scaled_left_pad + final_tile_width,
-            scaled_top_pad + final_tile_height
+            scaled_left_pad - keep_left,
+            scaled_top_pad - keep_top,
+            scaled_left_pad + final_tile_width + keep_right,
+            scaled_top_pad + final_tile_height + keep_bottom
         )
         cropped_tile = resized_tile.crop(crop_box)
-        
+
         progress.update_sub_progress("Mask Blending", 3)
-        
-        # Create mask with user-specified blur - respects exact setting
-        tile_mask = create_precise_tile_mask(final_tile_width, final_tile_height, mask_blur, tile_info["padding"])
-        
+
+        # Adjust paste position to account for kept left/top padding
+        paste_x_adjusted = max(0, paste_x - keep_left)
+        paste_y_adjusted = max(0, paste_y - keep_top)
+
+        # Create mask with user-specified blur - use actual tile size including kept overlap on all sides
+        actual_crop_width = cropped_tile.width
+        actual_crop_height = cropped_tile.height
+        tile_mask = create_precise_tile_mask(actual_crop_width, actual_crop_height, mask_blur, tile_info["padding"], keep_left, keep_top, keep_right, keep_bottom)
+
         # Create RGBA version of the tile for compositing
         tile_rgba = Image.new('RGBA', output_image.size, (0, 0, 0, 0))
-        tile_rgba.paste(cropped_tile, (paste_x, paste_y))
-        
+        tile_rgba.paste(cropped_tile, (paste_x_adjusted, paste_y_adjusted))
+
         # Create full-size mask
         full_mask = Image.new('L', output_image.size, 0)
-        full_mask.paste(tile_mask, (paste_x, paste_y))
+        full_mask.paste(tile_mask, (paste_x_adjusted, paste_y_adjusted))
         tile_rgba.putalpha(full_mask)
         
         # Alpha composite onto the output image
@@ -249,33 +275,57 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
     return output_image
 
 
-def create_precise_tile_mask(width, height, blur_radius, padding_info):
-    """Create smart blending mask - zero blur interior, minimal blur at seams."""
+def create_precise_tile_mask(width, height, blur_radius, padding_info, keep_left=0, keep_top=0, keep_right=0, keep_bottom=0):
+    """Create smart blending mask with proper overlap handling on all sides.
+
+    The mask ensures seamless blending in overlap regions:
+    - Left edge: fade from 0 to 255 in the kept overlap region (where this tile overlaps with left neighbor)
+    - Top edge: fade from 0 to 255 in the kept overlap region (where this tile overlaps with top neighbor)
+    - Right edge: fade from 255 to 0 in the kept overlap region (where this tile overlaps with right neighbor)
+    - Bottom edge: fade from 255 to 0 in the kept overlap region (where this tile overlaps with bottom neighbor)
+    - Interior: full opacity (255)
+    """
     left_pad, top_pad, right_pad, bottom_pad = padding_info
     mask_array = np.full((height, width), 255, dtype=np.uint8)
-    
-    # Smart blend: Use minimal blur only where absolutely needed
+
     if blur_radius > 0:
-        # Effective blur - never more than 3 pixels for seam hiding
-        effective_blur = min(blur_radius, 3)
-        
+        # Allow blend zones to be larger for smoother transitions
+        effective_blur = max(1, min(blur_radius, 32))
+
         for y in range(height):
             for x in range(width):
                 min_alpha = 255
-                
-                # Apply gradient only at tile boundaries
-                if left_pad > 0 and x < effective_blur:
-                    min_alpha = min(min_alpha, int(255 * (x / effective_blur)))
-                
-                if right_pad > 0 and x >= width - effective_blur:
-                    min_alpha = min(min_alpha, int(255 * ((width - x - 1) / effective_blur)))
-                
-                if top_pad > 0 and y < effective_blur:
-                    min_alpha = min(min_alpha, int(255 * (y / effective_blur)))
-                
-                if bottom_pad > 0 and y >= height - effective_blur:
-                    min_alpha = min(min_alpha, int(255 * ((height - y - 1) / effective_blur)))
-                
+
+                # LEFT EDGE: Fade from 0 to 255 in the kept overlap region
+                if left_pad > 0 and keep_left > 0 and x < keep_left:
+                    # x ranges from 0 to keep_left
+                    # Fade from 0 to 255
+                    fade_alpha = int(255 * (x / keep_left))
+                    min_alpha = min(min_alpha, fade_alpha)
+
+                # TOP EDGE: Fade from 0 to 255 in the kept overlap region
+                if top_pad > 0 and keep_top > 0 and y < keep_top:
+                    # y ranges from 0 to keep_top
+                    # Fade from 0 to 255
+                    fade_alpha = int(255 * (y / keep_top))
+                    min_alpha = min(min_alpha, fade_alpha)
+
+                # RIGHT EDGE: Fade from 255 to 0 in the kept overlap region
+                if right_pad > 0 and keep_right > 0 and x >= width - keep_right:
+                    # Position within the overlap region (0 to keep_right)
+                    overlap_pos = x - (width - keep_right)
+                    # Fade from 255 to 0 across the overlap
+                    fade_alpha = int(255 * (1.0 - overlap_pos / keep_right))
+                    min_alpha = min(min_alpha, fade_alpha)
+
+                # BOTTOM EDGE: Fade from 255 to 0 in the kept overlap region
+                if bottom_pad > 0 and keep_bottom > 0 and y >= height - keep_bottom:
+                    # Position within the overlap region (0 to keep_bottom)
+                    overlap_pos = y - (height - keep_bottom)
+                    # Fade from 255 to 0 across the overlap
+                    fade_alpha = int(255 * (1.0 - overlap_pos / keep_bottom))
+                    min_alpha = min(min_alpha, fade_alpha)
+
                 mask_array[y, x] = min_alpha
-    
+
     return Image.fromarray(mask_array)
