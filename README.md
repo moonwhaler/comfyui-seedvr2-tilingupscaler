@@ -47,7 +47,7 @@ In my tests the results were sometimes exceptional, sometimes "meh", depending o
 ### Prerequisites
 
 - ComfyUI installed and working
-- SeedVR2 models and nodes installed in ComfyUI
+- SeedVR2 models and nodes from https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler installed in ComfyUI
 
 ### Install the Node
 
