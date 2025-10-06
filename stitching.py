@@ -278,52 +278,53 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
 def create_precise_tile_mask(width, height, blur_radius, padding_info, keep_left=0, keep_top=0, keep_right=0, keep_bottom=0):
     """Create smart blending mask with proper overlap handling on all sides.
 
-    The mask ensures seamless blending in overlap regions:
-    - Left edge: fade from 0 to 255 in the kept overlap region (where this tile overlaps with left neighbor)
-    - Top edge: fade from 0 to 255 in the kept overlap region (where this tile overlaps with top neighbor)
-    - Right edge: fade from 255 to 0 in the kept overlap region (where this tile overlaps with right neighbor)
-    - Bottom edge: fade from 255 to 0 in the kept overlap region (where this tile overlaps with bottom neighbor)
-    - Interior: full opacity (255)
+    The mask ensures seamless blending in overlap regions by fading across the FULL overlap width.
+    Since each tile keeps half the padding, the total overlap is keep_left + keep_right (which equals
+    the full padding). Each tile must fade across this entire overlap region for masks to sum to 255.
     """
     left_pad, top_pad, right_pad, bottom_pad = padding_info
     mask_array = np.full((height, width), 255, dtype=np.uint8)
 
     if blur_radius > 0:
-        # Allow blend zones to be larger for smoother transitions
-        effective_blur = max(1, min(blur_radius, 32))
+        # The overlap width is double the kept amount (keep_left on this tile + keep_right on neighbor)
+        # We fade across the full overlap width to ensure masks sum to 255
+        overlap_width_left = keep_left * 2 if keep_left > 0 else 0
+        overlap_width_top = keep_top * 2 if keep_top > 0 else 0
+        overlap_width_right = keep_right * 2 if keep_right > 0 else 0
+        overlap_width_bottom = keep_bottom * 2 if keep_bottom > 0 else 0
 
         for y in range(height):
             for x in range(width):
                 min_alpha = 255
 
-                # LEFT EDGE: Fade from 0 to 255 in the kept overlap region
-                if left_pad > 0 and keep_left > 0 and x < keep_left:
-                    # x ranges from 0 to keep_left
-                    # Fade from 0 to 255
-                    fade_alpha = int(255 * (x / keep_left))
+                # LEFT EDGE: Fade from 0 to 255 across the FULL overlap width
+                # Overlap region is [0, overlap_width_left), fade across entire width
+                if left_pad > 0 and overlap_width_left > 0 and x < overlap_width_left:
+                    # Fade from 0 to 255 across the full overlap width
+                    # At x=0: fade_alpha = 0
+                    # At x=keep_left-1: fade_alpha ≈ 128 (halfway)
+                    # Note: we only have pixels up to keep_left in this tile
+                    fade_alpha = int(255 * x / overlap_width_left)
                     min_alpha = min(min_alpha, fade_alpha)
 
-                # TOP EDGE: Fade from 0 to 255 in the kept overlap region
-                if top_pad > 0 and keep_top > 0 and y < keep_top:
-                    # y ranges from 0 to keep_top
-                    # Fade from 0 to 255
-                    fade_alpha = int(255 * (y / keep_top))
+                # TOP EDGE: Same logic as left edge
+                if top_pad > 0 and overlap_width_top > 0 and y < overlap_width_top:
+                    fade_alpha = int(255 * y / overlap_width_top)
                     min_alpha = min(min_alpha, fade_alpha)
 
-                # RIGHT EDGE: Fade from 255 to 0 in the kept overlap region
-                if right_pad > 0 and keep_right > 0 and x >= width - keep_right:
-                    # Position within the overlap region (0 to keep_right)
-                    overlap_pos = x - (width - keep_right)
-                    # Fade from 255 to 0 across the overlap
-                    fade_alpha = int(255 * (1.0 - overlap_pos / keep_right))
+                # RIGHT EDGE: Fade from 255 to 0 across the FULL overlap width
+                # Overlap starts at (width - overlap_width_right), extends to width
+                if right_pad > 0 and overlap_width_right > 0 and x >= width - overlap_width_right:
+                    # Distance from start of overlap region
+                    distance_from_overlap_start = x - (width - overlap_width_right)
+                    # Fade from 255 to 0 across the full overlap width
+                    fade_alpha = int(255 * (1.0 - distance_from_overlap_start / overlap_width_right))
                     min_alpha = min(min_alpha, fade_alpha)
 
-                # BOTTOM EDGE: Fade from 255 to 0 in the kept overlap region
-                if bottom_pad > 0 and keep_bottom > 0 and y >= height - keep_bottom:
-                    # Position within the overlap region (0 to keep_bottom)
-                    overlap_pos = y - (height - keep_bottom)
-                    # Fade from 255 to 0 across the overlap
-                    fade_alpha = int(255 * (1.0 - overlap_pos / keep_bottom))
+                # BOTTOM EDGE: Same logic as right edge
+                if bottom_pad > 0 and overlap_width_bottom > 0 and y >= height - overlap_width_bottom:
+                    distance_from_overlap_start = y - (height - overlap_width_bottom)
+                    fade_alpha = int(255 * (1.0 - distance_from_overlap_start / overlap_width_bottom))
                     min_alpha = min(min_alpha, fade_alpha)
 
                 mask_array[y, x] = min_alpha
