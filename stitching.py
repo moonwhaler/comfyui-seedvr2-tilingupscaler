@@ -5,6 +5,7 @@ from PIL import Image
 from scipy import ndimage
 from scipy.signal import convolve2d
 from .image_utils import tensor_to_pil, pil_to_tensor
+from .seedvr2_adapter import build_execute_kwargs
 
 
 def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0):
@@ -71,14 +72,15 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
     if base_image is None:
         if hasattr(seedvr2_instance, '_original_image'):
             base_tensor = pil_to_tensor(seedvr2_instance._original_image)
-            base_upscaled_tuple = seedvr2_instance.execute(
-                images=base_tensor, 
-                model=model, 
-                seed=seed, 
-                new_resolution=min(512, tile_upscale_resolution//2),
-                batch_size=1, 
-                preserve_vram=preserve_vram, 
-                block_swap_config=block_swap_config
+            base_upscaled_tuple = _execute_seedvr2(
+                seedvr2_instance,
+                images=base_tensor,
+                model=model,
+                seed=seed,
+                new_resolution=min(512, tile_upscale_resolution // 2),
+                batch_size=1,
+                preserve_vram=preserve_vram,
+                block_swap_config=block_swap_config,
             )
             base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
             base_image = base_upscaled.resize((width, height), Image.LANCZOS)
@@ -95,7 +97,16 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
         
         # Upscale tile
         tile_tensor = pil_to_tensor(tile_info["tile"])
-        upscaled_tile_tuple = seedvr2_instance.execute(images=tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
+        upscaled_tile_tuple = _execute_seedvr2(
+            seedvr2_instance,
+            images=tile_tensor,
+            model=model,
+            seed=seed,
+            new_resolution=tile_upscale_resolution,
+            batch_size=1,
+            preserve_vram=preserve_vram,
+            block_swap_config=block_swap_config,
+        )
         ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
         progress.update_sub_progress("Resizing & Positioning", 2)
@@ -114,7 +125,7 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
         # Calculate scaled padding (both regular and memory padding)
         left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
         mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
-
+        
         scaled_left_pad = int(left_pad * upscale_factor)
         scaled_top_pad = int(top_pad * upscale_factor)
         scaled_right_pad = int(right_pad * upscale_factor)
@@ -137,7 +148,7 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
         )
         cropped_tile = resized_tile.crop(crop_box)
         tile_array = np.array(cropped_tile, dtype=np.float64)
-
+        
         progress.update_sub_progress("Seamless Blending", 3)
 
         # Adjust paste position to account for kept left/top padding
@@ -180,14 +191,15 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
     if base_image is None:
         if hasattr(seedvr2_instance, '_original_image'):
             base_tensor = pil_to_tensor(seedvr2_instance._original_image)
-            base_upscaled_tuple = seedvr2_instance.execute(
-                images=base_tensor, 
-                model=model, 
-                seed=seed, 
-                new_resolution=min(512, tile_upscale_resolution//2),
-                batch_size=1, 
-                preserve_vram=preserve_vram, 
-                block_swap_config=block_swap_config
+            base_upscaled_tuple = _execute_seedvr2(
+                seedvr2_instance,
+                images=base_tensor,
+                model=model,
+                seed=seed,
+                new_resolution=min(512, tile_upscale_resolution // 2),
+                batch_size=1,
+                preserve_vram=preserve_vram,
+                block_swap_config=block_swap_config,
             )
             base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
             base_image = base_upscaled.resize((width, height), Image.LANCZOS)
@@ -202,7 +214,16 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
         
         # Upscale tile
         tile_tensor = pil_to_tensor(tile_info["tile"])
-        upscaled_tile_tuple = seedvr2_instance.execute(images=tile_tensor, model=model, seed=seed, new_resolution=tile_upscale_resolution, batch_size=1, preserve_vram=preserve_vram, block_swap_config=block_swap_config)
+        upscaled_tile_tuple = _execute_seedvr2(
+            seedvr2_instance,
+            images=tile_tensor,
+            model=model,
+            seed=seed,
+            new_resolution=tile_upscale_resolution,
+            batch_size=1,
+            preserve_vram=preserve_vram,
+            block_swap_config=block_swap_config,
+        )
         ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
         progress.update_sub_progress("Resizing & Positioning", 2)
@@ -221,7 +242,7 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
         # Calculate scaled padding to crop correctly (both regular and memory padding)
         left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
         mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
-
+        
         scaled_left_pad = int(left_pad * upscale_factor)
         scaled_top_pad = int(top_pad * upscale_factor)
         scaled_right_pad = int(right_pad * upscale_factor)
@@ -328,5 +349,20 @@ def create_precise_tile_mask(width, height, blur_radius, padding_info, keep_left
                     min_alpha = min(min_alpha, fade_alpha)
 
                 mask_array[y, x] = min_alpha
-
+    
     return Image.fromarray(mask_array)
+
+
+def _execute_seedvr2(seedvr2_instance, *, images, model, seed, new_resolution, batch_size, preserve_vram,
+                     block_swap_config):
+    kwargs = build_execute_kwargs(
+        seedvr2_instance,
+        images=images,
+        model=model,
+        seed=seed,
+        new_resolution=new_resolution,
+        batch_size=batch_size,
+        preserve_vram=preserve_vram,
+        block_swap_config=block_swap_config,
+    )
+    return seedvr2_instance.execute(**kwargs)

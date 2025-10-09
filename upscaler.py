@@ -3,6 +3,7 @@
 import nodes
 from .progress import Progress
 from .image_utils import tensor_to_pil, pil_to_tensor
+from .seedvr2_adapter import resolve_model_choices
 from .tiling import generate_tiles
 from .stitching import process_and_stitch
 
@@ -10,18 +11,12 @@ from .stitching import process_and_stitch
 class SeedVR2TilingUpscaler:
     @classmethod
     def INPUT_TYPES(s):
+        models, default_model = resolve_model_choices()
         return {
             "required": {
                 "image": ("IMAGE",),
-                "model": ([
-                    "seedvr2_ema_3b_fp16.safetensors", 
-                    "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
-                    "seedvr2_ema_7b_fp16.safetensors",
-                    "seedvr2_ema_7b_fp8_e4m3fn.safetensors",
-                    "seedvr2_ema_7b_sharp_fp16.safetensors",
-                    "seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors"
-                ], {
-                    "default": "seedvr2_ema_3b_fp8_e4m3fn.safetensors"
+                "model": (models, {
+                    "default": default_model
                 }),
                 "seed": ("INT", {"default": 100, "min": 0, "max": 2**32 - 1, "step": 1}),
                 "new_resolution": ("INT", {"default": 1072, "min": 16, "max": 16384, "step": 16}),
