@@ -4,8 +4,6 @@ A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models 
 
 WARNING: This is not magic - although it sometimes may seem that way. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler processes I tested so far. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
 
-The stitching code is not optimal. I am trying to solve this, but "blurring" is not a good idea. I need to look into this more.
-
 ## Example upscales
 
 ![Example upscale 01](./examples/seedvr2_tiling_001.png) 
