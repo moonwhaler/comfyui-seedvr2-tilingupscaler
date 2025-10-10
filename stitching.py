@@ -8,13 +8,13 @@ from .image_utils import tensor_to_pil, pil_to_tensor
 from .seedvr2_adapter import build_execute_kwargs
 
 
-def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0):
+def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0, extra_args=None):
     """Main stitching function that chooses the appropriate method based on blur setting."""
     if mask_blur == 0:
         print("Using zero-blur mode for maximum detail preservation...")
-        result = process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image)
+        result = process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image, extra_args=extra_args)
     else:
-        result = process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image)
+        result = process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image, extra_args=extra_args)
     
     # Apply anti-aliasing if requested
     if anti_aliasing_strength > 0:
@@ -66,7 +66,7 @@ def apply_edge_aware_antialiasing(image, strength):
     return Image.fromarray(smoothed)
 
 
-def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image=None):
+def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image=None, extra_args=None):
     """Zero-blur stitching that preserves maximum detail through precise pixel averaging."""
     # Create base image if not provided
     if base_image is None:
@@ -81,6 +81,7 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
                 batch_size=1,
                 preserve_vram=preserve_vram,
                 block_swap_config=block_swap_config,
+                extra_args=extra_args,
             )
             base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
             base_image = base_upscaled.resize((width, height), Image.LANCZOS)
@@ -106,6 +107,7 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
             batch_size=1,
             preserve_vram=preserve_vram,
             block_swap_config=block_swap_config,
+            extra_args=extra_args,
         )
         ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
@@ -185,7 +187,7 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
     return Image.fromarray(output_array)
 
 
-def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None):
+def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, extra_args=None):
     """Standard blended stitching with user-controlled blur."""
     # Create base image if not provided
     if base_image is None:
@@ -200,6 +202,7 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
                 batch_size=1,
                 preserve_vram=preserve_vram,
                 block_swap_config=block_swap_config,
+                extra_args=extra_args,
             )
             base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
             base_image = base_upscaled.resize((width, height), Image.LANCZOS)
@@ -223,6 +226,7 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
             batch_size=1,
             preserve_vram=preserve_vram,
             block_swap_config=block_swap_config,
+            extra_args=extra_args,
         )
         ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
 
@@ -354,7 +358,7 @@ def create_precise_tile_mask(width, height, blur_radius, padding_info, keep_left
 
 
 def _execute_seedvr2(seedvr2_instance, *, images, model, seed, new_resolution, batch_size, preserve_vram,
-                     block_swap_config):
+                     block_swap_config, extra_args=None):
     kwargs = build_execute_kwargs(
         seedvr2_instance,
         images=images,
@@ -364,5 +368,6 @@ def _execute_seedvr2(seedvr2_instance, *, images, model, seed, new_resolution, b
         batch_size=batch_size,
         preserve_vram=preserve_vram,
         block_swap_config=block_swap_config,
+        extra_args=extra_args,
     )
     return seedvr2_instance.execute(**kwargs)

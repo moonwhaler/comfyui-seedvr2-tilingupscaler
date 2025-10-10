@@ -20,7 +20,6 @@ class SeedVR2TilingUpscaler:
                 }),
                 "seed": ("INT", {"default": 100, "min": 0, "max": 2**32 - 1, "step": 1}),
                 "new_resolution": ("INT", {"default": 1072, "min": 16, "max": 16384, "step": 16}),
-                "preserve_vram": ("BOOLEAN", {"default": False}),
                 "tile_width": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
                 "tile_height": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
                 "mask_blur": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
@@ -31,6 +30,7 @@ class SeedVR2TilingUpscaler:
             },
             "optional": {
                 "block_swap_config": ("block_swap_config",),
+                "extra_args": ("extra_args",),
             }
         }
 
@@ -38,12 +38,17 @@ class SeedVR2TilingUpscaler:
     FUNCTION = "upscale"
     CATEGORY = "image/upscaling"
 
-    def upscale(self, image, model, seed, new_resolution, preserve_vram, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, anti_aliasing_strength, block_swap_config=None):
+    def upscale(self, image, model, seed, new_resolution, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, anti_aliasing_strength, block_swap_config=None, extra_args=None):
         try:
+            # Extract preserve_vram from extra_args, or use default
+            preserve_vram = False
+            if extra_args is not None and isinstance(extra_args, dict):
+                preserve_vram = extra_args.get("preserve_vram", False)
+
             # Initialize progress tracking
             progress = Progress(0)  # Will update with actual count later
             progress.initialize_websocket_progress()
-            
+
             # Setup
             seedvr2_instance = self._get_seedvr2_instance()
             pil_image = tensor_to_pil(image)
@@ -60,9 +65,10 @@ class SeedVR2TilingUpscaler:
             
             # Process and stitch tiles
             output_image = process_and_stitch(
-                main_tiles, output_width, output_height, seedvr2_instance, model, seed, 
-                tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, 
-                mask_blur, progress, anti_aliasing_strength=anti_aliasing_strength
+                main_tiles, output_width, output_height, seedvr2_instance, model, seed,
+                tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor,
+                mask_blur, progress, anti_aliasing_strength=anti_aliasing_strength,
+                extra_args=extra_args
             )
 
             # Finalize progress

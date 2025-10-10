@@ -2,6 +2,8 @@
 
 A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and detail-preserving stitching.
 
+> **Note**: This node is based on and compatible with the **latest nightly build** of the [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) node pack. It supports all advanced features including the new `SeedVR2ExtraArgs` node for enhanced control over memory management and processing options.
+
 WARNING: This is not magic - although it sometimes may seem that way. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler processes I tested so far. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
 
 The stitching code is not optimal. I am trying to solve this, but "blurring" is not a good idea. I need to look into this more.
@@ -24,8 +26,12 @@ The stitching code is not optimal. I am trying to solve this, but "blurring" is 
 
 ## Compatibility & Model Discovery
 
+**Based on SeedVR2 Nightly Build**: This node is designed to work with the latest nightly version of the SeedVR2 node pack and supports all its advanced features.
+
 - **Dynamic model list**: Available models are pulled from seedvr2 node when the nightly package is installed. Main (stable) version keeps the predefined models list.
 - **GGUF support**: SeedVR2 nightly supports GGUF models, these are now selectable in the dropdown once they are downloaded or discovered on disk.
+- **Backward compatibility**: Works with both stable and nightly SeedVR2 builds through automatic API detection.
+- **Extra Args support**: Connect the `SeedVR2ExtraArgs` node (from nightly) for advanced options like `preserve_vram`, `tiled_vae`, `cache_model`, `enable_debug`, and device selection.
 
 ## How It Works
 
@@ -122,11 +128,21 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 
 ## Usage
 
+### Basic Usage
 1. Add the "SeedVR2 Tiling Upscaler" node to your ComfyUI workflow
 2. Connect your input image
 3. Select your desired SeedVR2 model
 4. Configure parameters
 5. Run the workflow
+
+### Advanced Usage with Extra Args (Nightly)
+For access to advanced memory management and processing options:
+1. Add the `SeedVR2ExtraArgs` node (from the nightly SeedVR2 node pack)
+2. Configure advanced options like `preserve_vram`, `tiled_vae`, `cache_model`, etc.
+3. Connect the output of `SeedVR2ExtraArgs` to the `extra_args` input of the Tiling Upscaler
+4. Optionally add `SeedVR2 BlockSwap Config` and connect to `block_swap_config` for additional VRAM management
+
+This modular approach allows you to use the basic node without any extra configuration, or connect additional nodes for fine-grained control.
 
 ## Parameters
 
@@ -134,7 +150,16 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 - **model**: SeedVR2 model to use for upscaling
 - **seed**: Random seed for reproducible results
 - **new_resolution**: Target resolution for the longest side of the output image
-- **preserve_vram**: Enable VRAM optimization in SeedVR2
+
+### Optional Inputs
+- **block_swap_config**: Connect the `SeedVR2 BlockSwap Config` node for advanced VRAM management
+- **extra_args**: Connect the `SeedVR2ExtraArgs` node (from nightly) for advanced options:
+  - `preserve_vram`: Enable VRAM optimization by offloading models between steps
+  - `tiled_vae`: Enable tiled VAE processing for extreme memory savings
+  - `vae_tile_size` / `vae_tile_overlap`: Control VAE tiling behavior
+  - `cache_model`: Keep models in RAM between runs for faster batch processing
+  - `enable_debug`: Show detailed memory usage and timing information
+  - `device`: Select which GPU to use for processing
 
 ### Memory Management
 - **tile_upscale_resolution**: Maximum resolution for individual tile upscaling
@@ -179,9 +204,10 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 
 ### OOM Errors
 - Reduce `tile_upscale_resolution`
-- Enable `preserve_vram`
+- Connect the `SeedVR2ExtraArgs` node and enable `preserve_vram` and/or `tiled_vae`
 - Reduce `tile_width` and `tile_height`
-- Use the "SeedVR2 BlockSwap Config" (from the original SeedVR2 nodes) and attach it to the "block_swap_config" input of the Tiling Upscaler node. Set the "blocks_to_swap" value until you won't get any OOMs anymore. You need RAM for that in return!
+- Use the `SeedVR2 BlockSwap Config` node and connect it to `block_swap_config` input. Increase `blocks_to_swap` until OOMs stop (requires RAM)
+- In `SeedVR2ExtraArgs`, reduce `vae_tile_size` for additional VAE memory savings
 
 ### Visible Seams
 - **New solution**: The advanced multi-band blending should eliminate most seams
@@ -216,7 +242,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## Credits
 
 - Partly based on the Ultimate SD Upscale methodology and adapted to the SeedVR2 process
-- Uses the numz ComfyUI node as base (https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)
-- Adapted for SeedVR2 models with detail preservation focus
+- Based on the **latest nightly build** of the ComfyUI-SeedVR2_VideoUpscaler by numz (https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)
+- Adapted for SeedVR2 models with detail preservation focus and advanced tiling capabilities
 - Built for ComfyUI ecosystem
 - Example image (https://www.flickr.com/photos/160246067@N08/44726249090, public domain license) by TLC Jonhson (https://www.flickr.com/photos/160246067@N08/)

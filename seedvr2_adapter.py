@@ -129,7 +129,15 @@ def build_execute_kwargs(
         latent_noise_scale: Optional[float] = None,
         extra_args: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Construct keyword arguments compatible with the current SeedVR2 build."""
+    """Construct keyword arguments compatible with the current SeedVR2 build.
+
+    Supports both stable and nightly builds:
+    - Stable: preserve_vram is a top-level parameter
+    - Nightly: preserve_vram is moved into extra_args
+
+    The signature introspection automatically filters parameters based on
+    what the installed version supports.
+    """
 
     sig = _get_execute_signature(instance)
 
@@ -137,27 +145,36 @@ def build_execute_kwargs(
     effective_input_noise = input_noise_scale if input_noise_scale is not None else DEFAULTS.input_noise_scale
     effective_latent_noise = latent_noise_scale if latent_noise_scale is not None else DEFAULTS.latent_noise_scale
 
+    # Build base payload
     payload: Dict[str, Any] = {
         "images": images,
         "model": model,
         "seed": seed,
         "new_resolution": new_resolution,
         "batch_size": batch_size,
-        "preserve_vram": preserve_vram,
         "color_correction": effective_color_correction,
         "input_noise_scale": effective_input_noise,
         "latent_noise_scale": effective_latent_noise,
     }
 
+    # Add block_swap_config if provided
     if block_swap_config is not None:
         payload["block_swap_config"] = block_swap_config
 
+    # Build extra_args for nightly support
+    # Start with preserve_vram which is now in extra_args in nightly
     extra_payload: Dict[str, Any] = {"preserve_vram": preserve_vram}
+
+    # Merge any additional extra_args provided by caller
     if extra_args:
         extra_payload.update(extra_args)
 
-    if extra_payload:
-        payload["extra_args"] = extra_payload
+    # Add extra_args to payload (will be filtered out if not supported)
+    payload["extra_args"] = extra_payload
+
+    # Also add preserve_vram to top level for backward compatibility with stable
+    # (will be filtered out if not supported)
+    payload["preserve_vram"] = preserve_vram
 
     return _filter_supported_kwargs(payload, sig)
 
