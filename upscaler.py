@@ -16,21 +16,76 @@ class SeedVR2TilingUpscaler:
             "required": {
                 "image": ("IMAGE",),
                 "model": (models, {
-                    "default": default_model
+                    "default": default_model,
+                    "tooltip": "SeedVR2 model variant to use for upscaling. Models auto-download on first use."
                 }),
-                "seed": ("INT", {"default": 100, "min": 0, "max": 2**32 - 1, "step": 1}),
-                "new_resolution": ("INT", {"default": 1072, "min": 16, "max": 16384, "step": 16}),
-                "tile_width": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
-                "tile_height": ("INT", {"default": 512, "min": 64, "max": 8192, "step": 8}),
-                "mask_blur": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
-                "tile_padding": ("INT", {"default": 32, "min": 0, "max": 8192, "step": 8}),
-                "tile_upscale_resolution": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
-                "tiling_strategy": (["Chess", "Linear"],),
-                "anti_aliasing_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "seed": ("INT", {
+                    "default": 100,
+                    "min": 0,
+                    "max": 2**32 - 1,
+                    "step": 1,
+                    "tooltip": "Random seed for reproducible results. Same seed produces same output."
+                }),
+                "new_resolution": ("INT", {
+                    "default": 1072,
+                    "min": 16,
+                    "max": 16384,
+                    "step": 16,
+                    "tooltip": "Target resolution for the longest side of output. Aspect ratio is maintained."
+                }),
+                "tile_width": ("INT", {
+                    "default": 512,
+                    "min": 64,
+                    "max": 8192,
+                    "step": 8,
+                    "tooltip": "Width of each tile in pixels. Smaller tiles use less VRAM but may show more seams."
+                }),
+                "tile_height": ("INT", {
+                    "default": 512,
+                    "min": 64,
+                    "max": 8192,
+                    "step": 8,
+                    "tooltip": "Height of each tile in pixels. Smaller tiles use less VRAM but may show more seams."
+                }),
+                "mask_blur": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 64,
+                    "step": 1,
+                    "tooltip": "Tile edge blending. 0=multi-band frequency separation (best detail), 1-3=minimal blur, 4+=traditional blur."
+                }),
+                "tile_padding": ("INT", {
+                    "default": 32,
+                    "min": 0,
+                    "max": 8192,
+                    "step": 8,
+                    "tooltip": "Overlap between tiles in pixels. Higher values reduce seams but increase processing time. Recommended: 32-64."
+                }),
+                "tile_upscale_resolution": ("INT", {
+                    "default": 1024,
+                    "min": 64,
+                    "max": 8192,
+                    "step": 8,
+                    "tooltip": "Maximum resolution for upscaling individual tiles. Higher=better quality but more VRAM. Try 1024-2048."
+                }),
+                "tiling_strategy": (["Chess", "Linear"], {
+                    "tooltip": "Tile processing order. Chess=checkerboard pattern for better blending, Linear=row-by-row (faster)."
+                }),
+                "anti_aliasing_strength": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "tooltip": "Edge-aware smoothing strength. 0=disabled, 0.1-0.3=subtle smoothing. May soften details."
+                }),
             },
             "optional": {
-                "block_swap_config": ("block_swap_config",),
-                "extra_args": ("extra_args",),
+                "block_swap_config": ("block_swap_config", {
+                    "tooltip": "Optional BlockSwap configuration for extreme VRAM savings by swapping transformer blocks to RAM."
+                }),
+                "extra_args": ("extra_args", {
+                    "tooltip": "Optional advanced options from SeedVR2ExtraArgs node: preserve_vram, tiled_vae, cache_model, debug, device."
+                }),
             }
         }
 
