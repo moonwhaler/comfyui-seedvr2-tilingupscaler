@@ -17,8 +17,13 @@ WARNING: This is not magic - although it sometimes may seem that way. It will al
 - **Content-Aware Stitching**: Adaptive blending based on local image structure and edge strength
 - **Edge-Preserving Smoothing**: Bilateral filtering reduces artifacts without destroying fine details
 - **Memory Optimized**: Prevents OOM errors using configurable tile-based upscaling
-- **SeedVR2 Integration**: Works with all SeedVR2 model variants (3B/7B, FP16/FP8, Sharp versions)
+- **SeedVR2 Integration**: Works with SeedVR2 stable releases and nightly builds (3B/7B, FP16/FP8, sharp, GGUF)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
+
+## Compatibility & Model Discovery
+
+- **Dynamic model list**: Available models are pulled from seedvr2 node when the nightly package is installed. Main (stable) version keeps the predefined models list.
+- **GGUF support**: SeedVR2 nightly supports GGUF models, these are now selectable in the dropdown once they are downloaded or discovered on disk.
 
 ## How It Works
 
