@@ -61,7 +61,11 @@ In my tests the results were sometimes exceptional, sometimes "meh", depending o
 - SeedVR2 models and nodes from https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler installed in ComfyUI
 - If you want to use the advanced workflow, you might need to install KJNodes, too. (https://github.com/kijai/ComfyUI-KJNodes)
 
-### Install the Node
+### Install the Node (ComfyUI-Manager)
+
+If you're using the ComfyUI-Manager extension, you can also install this node there.
+
+### Install the Node (manually)
 
 1. Clone this repository to your ComfyUI custom nodes directory:
 ```bash
