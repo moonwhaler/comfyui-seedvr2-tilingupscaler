@@ -50,13 +50,14 @@ In my tests the results were sometimes exceptional, sometimes "meh", depending o
 
 - ComfyUI installed and working
 - SeedVR2 models and nodes from https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler installed in ComfyUI
+- If you want to use the advanced workflow you might need to install KJNodes, too. (https://github.com/kijai/ComfyUI-KJNodes)
 
 ### Install the Node
 
 1. Clone this repository to your ComfyUI custom nodes directory:
 ```bash
 cd ComfyUI/custom_nodes/
-git clone https://github.com/moonwhaler/UltimateResupscaler.git
+git clone https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler.git
 ```
 
 2. Install dependencies (outside of ComfyUI):
