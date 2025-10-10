@@ -22,8 +22,7 @@ WARNING: This is not magic - although it sometimes may seem that way. It will al
 
 ## Compatibility & Model Discovery
 
-- **Dynamic model list**: Available models are pulled from seedvr2 node when the nightly package is installed. Main (stable) version keeps the predefined models list.
-- **GGUF support**: SeedVR2 nightly supports GGUF models, these are now selectable in the dropdown once they are downloaded or discovered on disk.
+- All new features are currently developed in the "nightly" branch.
 
 ## How It Works
 
