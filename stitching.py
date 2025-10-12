@@ -1,11 +1,149 @@
 """Stitching algorithms for blending upscaled tiles."""
 
+import torch
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 from scipy.signal import convolve2d
+from collections import defaultdict
 from .image_utils import tensor_to_pil, pil_to_tensor
 from .seedvr2_adapter import build_execute_kwargs
+
+
+def _get_optimal_batch_size(num_tiles):
+    """Calculate optimal batch size following 4n+1 pattern (1, 5, 9, 13, 17, 21...)"""
+    if num_tiles <= 1:
+        return 1
+    # Find largest 4n+1 that doesn't exceed num_tiles
+    n = (num_tiles - 1) // 4
+    return 4 * n + 1
+
+
+def _create_base_image(seedvr2_instance, width, height, model, seed, tile_upscale_resolution,
+                       preserve_vram, block_swap_config, extra_args, base_image=None):
+    """Create or return base image for stitching."""
+    if base_image is not None:
+        return base_image
+
+    if hasattr(seedvr2_instance, '_original_image'):
+        base_tensor = pil_to_tensor(seedvr2_instance._original_image)
+        base_upscaled_tuple = _execute_seedvr2(
+            seedvr2_instance,
+            images=base_tensor,
+            model=model,
+            seed=seed,
+            new_resolution=min(512, tile_upscale_resolution // 2),
+            batch_size=1,
+            preserve_vram=preserve_vram,
+            block_swap_config=block_swap_config,
+            extra_args=extra_args,
+        )
+        base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
+        return base_upscaled.resize((width, height), Image.LANCZOS)
+    else:
+        return Image.new('RGB', (width, height), (128, 128, 128))
+
+
+def _batch_upscale_tiles(tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
+                         preserve_vram, block_swap_config, extra_args):
+    """Batch process tiles by grouping them by size for optimal performance."""
+    # Group tiles by their dimensions
+    tiles_by_size = defaultdict(list)
+    for idx, tile_info in enumerate(tiles):
+        tile_size = (tile_info["tile"].width, tile_info["tile"].height)
+        tiles_by_size[tile_size].append((idx, tile_info))
+
+    # Process each size group with optimal batch sizes
+    upscaled_tiles = [None] * len(tiles)  # Store results in original order
+
+    for tile_size, tile_group in tiles_by_size.items():
+        num_tiles_in_group = len(tile_group)
+        processed_tiles = 0
+
+        # Process this size group in optimal sub-batches
+        while processed_tiles < num_tiles_in_group:
+            remaining = num_tiles_in_group - processed_tiles
+            batch_size = _get_optimal_batch_size(remaining)
+
+            # Get tiles for this sub-batch
+            sub_batch = tile_group[processed_tiles:processed_tiles + batch_size]
+
+            # Collect tensors for this sub-batch
+            tile_tensors = [pil_to_tensor(tile_info["tile"]) for _, tile_info in sub_batch]
+            batch_tensor = torch.cat(tile_tensors, dim=0)
+
+            # Process this sub-batch
+            upscaled_batch_tuple = _execute_seedvr2(
+                seedvr2_instance,
+                images=batch_tensor,
+                model=model,
+                seed=seed,
+                new_resolution=tile_upscale_resolution,
+                batch_size=batch_size,
+                preserve_vram=preserve_vram,
+                block_swap_config=block_swap_config,
+                extra_args=extra_args,
+            )
+            upscaled_batch = upscaled_batch_tuple[0]
+
+            # Store results back in original order
+            for batch_idx, (original_idx, _) in enumerate(sub_batch):
+                upscaled_tiles[original_idx] = tensor_to_pil(upscaled_batch[batch_idx:batch_idx+1])
+
+            processed_tiles += batch_size
+
+    return upscaled_tiles
+
+
+def _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor):
+    """Prepare an upscaled tile for stitching by resizing, positioning, and cropping."""
+    # Resize to final target size
+    target_tile_width = int(tile_info["tile"].width * upscale_factor)
+    target_tile_height = int(tile_info["tile"].height * upscale_factor)
+    resized_tile = ai_upscaled_tile.resize((target_tile_width, target_tile_height), Image.LANCZOS)
+
+    # Calculate positioning
+    paste_x = int(tile_info["position"][0] * upscale_factor)
+    paste_y = int(tile_info["position"][1] * upscale_factor)
+    final_tile_width = int(tile_info["actual_size"][0] * upscale_factor)
+    final_tile_height = int(tile_info["actual_size"][1] * upscale_factor)
+
+    # Calculate scaled padding (both regular and memory padding)
+    left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
+    mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
+
+    scaled_left_pad = int(left_pad * upscale_factor)
+    scaled_top_pad = int(top_pad * upscale_factor)
+    scaled_right_pad = int(right_pad * upscale_factor)
+    scaled_bottom_pad = int(bottom_pad * upscale_factor)
+    scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
+    scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
+
+    # Keep half the padding on ALL sides to create overlap for blending
+    keep_left = scaled_left_pad // 2 if left_pad > 0 else 0
+    keep_top = scaled_top_pad // 2 if top_pad > 0 else 0
+    keep_right = scaled_right_pad // 2 if right_pad > 0 else 0
+    keep_bottom = scaled_bottom_pad // 2 if bottom_pad > 0 else 0
+
+    # Crop the upscaled tile - keep partial padding on all sides
+    crop_box = (
+        scaled_left_pad - keep_left,
+        scaled_top_pad - keep_top,
+        scaled_left_pad + final_tile_width + keep_right,
+        scaled_top_pad + final_tile_height + keep_bottom
+    )
+    cropped_tile = resized_tile.crop(crop_box)
+
+    # Adjust paste position to account for kept left/top padding
+    paste_x_adjusted = max(0, paste_x - keep_left)
+    paste_y_adjusted = max(0, paste_y - keep_top)
+
+    return {
+        "cropped_tile": cropped_tile,
+        "paste_x": paste_x_adjusted,
+        "paste_y": paste_y_adjusted,
+        "keep_padding": (keep_left, keep_top, keep_right, keep_bottom),
+    }
 
 
 def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0, extra_args=None):
@@ -68,94 +206,39 @@ def apply_edge_aware_antialiasing(image, strength):
 
 def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image=None, extra_args=None):
     """Zero-blur stitching that preserves maximum detail through precise pixel averaging."""
-    # Create base image if not provided
-    if base_image is None:
-        if hasattr(seedvr2_instance, '_original_image'):
-            base_tensor = pil_to_tensor(seedvr2_instance._original_image)
-            base_upscaled_tuple = _execute_seedvr2(
-                seedvr2_instance,
-                images=base_tensor,
-                model=model,
-                seed=seed,
-                new_resolution=min(512, tile_upscale_resolution // 2),
-                batch_size=1,
-                preserve_vram=preserve_vram,
-                block_swap_config=block_swap_config,
-                extra_args=extra_args,
-            )
-            base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
-            base_image = base_upscaled.resize((width, height), Image.LANCZOS)
-        else:
-            base_image = Image.new('RGB', (width, height), (128, 128, 128))
-    
+    # Create base image
+    base_image = _create_base_image(
+        seedvr2_instance, width, height, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args, base_image
+    )
+
     # Use numpy arrays for precise pixel control
     output_array = np.array(base_image, dtype=np.float64)
     weight_array = np.zeros((height, width), dtype=np.float64)
-    
-    # Process all tiles with precise pixel averaging
+
+    # Batch process and upscale tiles
+    progress.update_sub_progress("AI Upscaling", 1)
+    upscaled_tiles = _batch_upscale_tiles(
+        tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args
+    )
+
+    # Now process each upscaled tile for stitching
     for tile_idx, tile_info in enumerate(tiles):
-        progress.update_sub_progress("AI Upscaling", 1)
-        
-        # Upscale tile
-        tile_tensor = pil_to_tensor(tile_info["tile"])
-        upscaled_tile_tuple = _execute_seedvr2(
-            seedvr2_instance,
-            images=tile_tensor,
-            model=model,
-            seed=seed,
-            new_resolution=tile_upscale_resolution,
-            batch_size=1,
-            preserve_vram=preserve_vram,
-            block_swap_config=block_swap_config,
-            extra_args=extra_args,
-        )
-        ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
+        # Get the pre-upscaled tile
+        ai_upscaled_tile = upscaled_tiles[tile_idx]
 
         progress.update_sub_progress("Resizing & Positioning", 2)
-        
-        # Resize to final target size
-        target_tile_width = int(tile_info["tile"].width * upscale_factor)
-        target_tile_height = int(tile_info["tile"].height * upscale_factor)
-        resized_tile = ai_upscaled_tile.resize((target_tile_width, target_tile_height), Image.LANCZOS)
-        
-        # Calculate positioning
-        paste_x = int(tile_info["position"][0] * upscale_factor)
-        paste_y = int(tile_info["position"][1] * upscale_factor)
-        final_tile_width = int(tile_info["actual_size"][0] * upscale_factor)
-        final_tile_height = int(tile_info["actual_size"][1] * upscale_factor)
-        
-        # Calculate scaled padding (both regular and memory padding)
-        left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
-        mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
-        
-        scaled_left_pad = int(left_pad * upscale_factor)
-        scaled_top_pad = int(top_pad * upscale_factor)
-        scaled_right_pad = int(right_pad * upscale_factor)
-        scaled_bottom_pad = int(bottom_pad * upscale_factor)
-        scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
-        scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
 
-        # Keep half the padding on ALL sides to create overlap for blending
-        keep_left = scaled_left_pad // 2 if left_pad > 0 else 0
-        keep_top = scaled_top_pad // 2 if top_pad > 0 else 0
-        keep_right = scaled_right_pad // 2 if right_pad > 0 else 0
-        keep_bottom = scaled_bottom_pad // 2 if bottom_pad > 0 else 0
+        # Prepare tile for stitching
+        prepared = _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor)
+        cropped_tile = prepared["cropped_tile"]
+        paste_x_adjusted = prepared["paste_x"]
+        paste_y_adjusted = prepared["paste_y"]
 
-        # Crop the upscaled tile - keep partial padding on all sides
-        crop_box = (
-            scaled_left_pad - keep_left,
-            scaled_top_pad - keep_top,
-            scaled_left_pad + final_tile_width + keep_right,
-            scaled_top_pad + final_tile_height + keep_bottom
-        )
-        cropped_tile = resized_tile.crop(crop_box)
         tile_array = np.array(cropped_tile, dtype=np.float64)
-        
-        progress.update_sub_progress("Seamless Blending", 3)
 
-        # Adjust paste position to account for kept left/top padding
-        paste_x_adjusted = max(0, paste_x - keep_left)
-        paste_y_adjusted = max(0, paste_y - keep_top)
+        progress.update_sub_progress("Seamless Blending", 3)
 
         # Define the region in the output image
         end_x = min(paste_x_adjusted + tile_array.shape[1], width)
@@ -189,91 +272,36 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
 
 def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, extra_args=None):
     """Standard blended stitching with user-controlled blur."""
-    # Create base image if not provided
-    if base_image is None:
-        if hasattr(seedvr2_instance, '_original_image'):
-            base_tensor = pil_to_tensor(seedvr2_instance._original_image)
-            base_upscaled_tuple = _execute_seedvr2(
-                seedvr2_instance,
-                images=base_tensor,
-                model=model,
-                seed=seed,
-                new_resolution=min(512, tile_upscale_resolution // 2),
-                batch_size=1,
-                preserve_vram=preserve_vram,
-                block_swap_config=block_swap_config,
-                extra_args=extra_args,
-            )
-            base_upscaled = tensor_to_pil(base_upscaled_tuple[0])
-            base_image = base_upscaled.resize((width, height), Image.LANCZOS)
-        else:
-            base_image = Image.new('RGB', (width, height), (128, 128, 128))
-    
+    # Create base image
+    base_image = _create_base_image(
+        seedvr2_instance, width, height, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args, base_image
+    )
+
     output_image = base_image.copy()
 
-    # Process all tiles with controlled blur blending
+    # Batch process and upscale tiles
+    progress.update_sub_progress("AI Upscaling", 1)
+    upscaled_tiles = _batch_upscale_tiles(
+        tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args
+    )
+
+    # Now process each upscaled tile for stitching
     for tile_idx, tile_info in enumerate(tiles):
-        progress.update_sub_progress("AI Upscaling", 1)
-        
-        # Upscale tile
-        tile_tensor = pil_to_tensor(tile_info["tile"])
-        upscaled_tile_tuple = _execute_seedvr2(
-            seedvr2_instance,
-            images=tile_tensor,
-            model=model,
-            seed=seed,
-            new_resolution=tile_upscale_resolution,
-            batch_size=1,
-            preserve_vram=preserve_vram,
-            block_swap_config=block_swap_config,
-            extra_args=extra_args,
-        )
-        ai_upscaled_tile = tensor_to_pil(upscaled_tile_tuple[0])
+        # Get the pre-upscaled tile
+        ai_upscaled_tile = upscaled_tiles[tile_idx]
 
         progress.update_sub_progress("Resizing & Positioning", 2)
-        
-        # Resize to final target size
-        target_tile_width = int(tile_info["tile"].width * upscale_factor)
-        target_tile_height = int(tile_info["tile"].height * upscale_factor)
-        resized_tile = ai_upscaled_tile.resize((target_tile_width, target_tile_height), Image.LANCZOS)
-        
-        # Calculate the region this tile covers (without padding)
-        paste_x = int(tile_info["position"][0] * upscale_factor)
-        paste_y = int(tile_info["position"][1] * upscale_factor)
-        final_tile_width = int(tile_info["actual_size"][0] * upscale_factor)
-        final_tile_height = int(tile_info["actual_size"][1] * upscale_factor)
-        
-        # Calculate scaled padding to crop correctly (both regular and memory padding)
-        left_pad, top_pad, right_pad, bottom_pad = tile_info["padding"]
-        mem_left_pad, mem_top_pad, mem_right_pad, mem_bottom_pad = tile_info.get("memory_padding", (0, 0, 0, 0))
-        
-        scaled_left_pad = int(left_pad * upscale_factor)
-        scaled_top_pad = int(top_pad * upscale_factor)
-        scaled_right_pad = int(right_pad * upscale_factor)
-        scaled_bottom_pad = int(bottom_pad * upscale_factor)
-        scaled_mem_right_pad = int(mem_right_pad * upscale_factor)
-        scaled_mem_bottom_pad = int(mem_bottom_pad * upscale_factor)
 
-        # Keep half the padding on ALL sides to create overlap for blending
-        keep_left = scaled_left_pad // 2 if left_pad > 0 else 0
-        keep_top = scaled_top_pad // 2 if top_pad > 0 else 0
-        keep_right = scaled_right_pad // 2 if right_pad > 0 else 0
-        keep_bottom = scaled_bottom_pad // 2 if bottom_pad > 0 else 0
-
-        # Crop the upscaled tile - keep partial padding on all sides
-        crop_box = (
-            scaled_left_pad - keep_left,
-            scaled_top_pad - keep_top,
-            scaled_left_pad + final_tile_width + keep_right,
-            scaled_top_pad + final_tile_height + keep_bottom
-        )
-        cropped_tile = resized_tile.crop(crop_box)
+        # Prepare tile for stitching
+        prepared = _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor)
+        cropped_tile = prepared["cropped_tile"]
+        paste_x_adjusted = prepared["paste_x"]
+        paste_y_adjusted = prepared["paste_y"]
+        keep_left, keep_top, keep_right, keep_bottom = prepared["keep_padding"]
 
         progress.update_sub_progress("Mask Blending", 3)
-
-        # Adjust paste position to account for kept left/top padding
-        paste_x_adjusted = max(0, paste_x - keep_left)
-        paste_y_adjusted = max(0, paste_y - keep_top)
 
         # Create mask with user-specified blur - use actual tile size including kept overlap on all sides
         actual_crop_width = cropped_tile.width
