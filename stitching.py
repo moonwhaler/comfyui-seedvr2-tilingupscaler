@@ -51,7 +51,7 @@ def _create_base_image(seedvr2_instance, width, height, model, seed, tile_upscal
 
 
 def _batch_upscale_tiles(tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
-                         preserve_vram, block_swap_config, extra_args):
+                         preserve_vram, block_swap_config, extra_args, progress=None):
     """Batch process tiles by grouping them by size for optimal performance."""
     # Group tiles by their dimensions
     tiles_by_size = defaultdict(list)
@@ -61,6 +61,7 @@ def _batch_upscale_tiles(tiles, seedvr2_instance, model, seed, tile_upscale_reso
 
     # Process each size group with optimal batch sizes
     upscaled_tiles = [None] * len(tiles)  # Store results in original order
+    tiles_processed_count = 0
 
     for tile_size, tile_group in tiles_by_size.items():
         num_tiles_in_group = len(tile_group)
@@ -77,6 +78,10 @@ def _batch_upscale_tiles(tiles, seedvr2_instance, model, seed, tile_upscale_reso
             # Collect tensors for this sub-batch
             tile_tensors = [pil_to_tensor(tile_info["tile"]) for _, tile_info in sub_batch]
             batch_tensor = torch.cat(tile_tensors, dim=0)
+
+            # Update progress before processing
+            if progress:
+                progress.update_sub_progress(f"AI Upscaling ({tiles_processed_count + 1}/{len(tiles)})", 1)
 
             # Process this sub-batch
             upscaled_batch_tuple = _execute_seedvr2(
@@ -95,6 +100,10 @@ def _batch_upscale_tiles(tiles, seedvr2_instance, model, seed, tile_upscale_reso
             # Store results back in original order
             for batch_idx, (original_idx, _) in enumerate(sub_batch):
                 upscaled_tiles[original_idx] = tensor_to_pil(upscaled_batch[batch_idx:batch_idx+1])
+                tiles_processed_count += 1
+                # Update progress after each tile
+                if progress:
+                    progress.update_sub_progress(f"AI Upscaling ({tiles_processed_count}/{len(tiles)})", 1)
 
             processed_tiles += batch_size
 
@@ -412,10 +421,9 @@ def process_and_stitch_multiband(tiles, width, height, seedvr2_instance, model, 
     )
 
     # Batch process and upscale tiles
-    progress.update_sub_progress("AI Upscaling", 1)
     upscaled_tiles = _batch_upscale_tiles(
         tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
-        preserve_vram, block_swap_config, extra_args
+        preserve_vram, block_swap_config, extra_args, progress
     )
 
     # Build Laplacian pyramid for base image
@@ -517,10 +525,9 @@ def process_and_stitch_bilateral(tiles, width, height, seedvr2_instance, model, 
     weight_array = np.zeros((height, width), dtype=np.float64)
 
     # Batch process and upscale tiles
-    progress.update_sub_progress("AI Upscaling", 1)
     upscaled_tiles = _batch_upscale_tiles(
         tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
-        preserve_vram, block_swap_config, extra_args
+        preserve_vram, block_swap_config, extra_args, progress
     )
 
     # Process each tile
@@ -587,10 +594,9 @@ def process_and_stitch_content_aware(tiles, width, height, seedvr2_instance, mod
     base_edge_strength, base_coherence = _compute_structure_tensor(output_array)
 
     # Batch process and upscale tiles
-    progress.update_sub_progress("AI Upscaling", 1)
     upscaled_tiles = _batch_upscale_tiles(
         tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
-        preserve_vram, block_swap_config, extra_args
+        preserve_vram, block_swap_config, extra_args, progress
     )
 
     # Process each tile
@@ -671,10 +677,9 @@ def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, 
     weight_array = np.zeros((height, width), dtype=np.float64)
 
     # Batch process and upscale tiles
-    progress.update_sub_progress("AI Upscaling", 1)
     upscaled_tiles = _batch_upscale_tiles(
         tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
-        preserve_vram, block_swap_config, extra_args
+        preserve_vram, block_swap_config, extra_args, progress
     )
 
     # Now process each upscaled tile for stitching
@@ -735,10 +740,9 @@ def process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, se
     output_image = base_image.copy()
 
     # Batch process and upscale tiles
-    progress.update_sub_progress("AI Upscaling", 1)
     upscaled_tiles = _batch_upscale_tiles(
         tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
-        preserve_vram, block_swap_config, extra_args
+        preserve_vram, block_swap_config, extra_args, progress
     )
 
     # Now process each upscaled tile for stitching
