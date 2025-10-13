@@ -78,6 +78,10 @@ class SeedVR2TilingUpscaler:
                     "step": 0.05,
                     "tooltip": "Edge-aware smoothing strength. 0=disabled, 0.1-0.3=subtle smoothing. May soften details."
                 }),
+                "blending_method": (["auto", "multiband", "bilateral", "content_aware", "linear", "simple"], {
+                    "default": "auto",
+                    "tooltip": "Blending algorithm: auto (mask_blur based), multiband (Laplacian pyramid/frequency separation), bilateral (edge-preserving filter), content_aware (structure-adaptive), linear (alpha blend), simple (pixel averaging)."
+                }),
             },
             "optional": {
                 "block_swap_config": ("block_swap_config", {
@@ -93,7 +97,7 @@ class SeedVR2TilingUpscaler:
     FUNCTION = "upscale"
     CATEGORY = "image/upscaling"
 
-    def upscale(self, image, model, seed, new_resolution, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, anti_aliasing_strength, block_swap_config=None, extra_args=None):
+    def upscale(self, image, model, seed, new_resolution, tile_width, tile_height, mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy, anti_aliasing_strength, blending_method="auto", block_swap_config=None, extra_args=None):
         try:
             # Extract preserve_vram from extra_args, or use default
             preserve_vram = False
@@ -123,7 +127,7 @@ class SeedVR2TilingUpscaler:
                 main_tiles, output_width, output_height, seedvr2_instance, model, seed,
                 tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor,
                 mask_blur, progress, anti_aliasing_strength=anti_aliasing_strength,
-                extra_args=extra_args
+                extra_args=extra_args, blending_method=blending_method
             )
 
             # Finalize progress

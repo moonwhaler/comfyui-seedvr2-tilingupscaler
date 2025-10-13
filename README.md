@@ -6,8 +6,7 @@ A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models 
 
 WARNING: This is not magic - although it sometimes may seem that way. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler processes I tested so far. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
 
-The stitching code is not optimal. You will get the best results by using the tile_width & tile_height of "512" with no (0.0) anti_aliasing_strength and a padding of "32" / "64", also no mask_blur to get multi-band frequency separation. I upscaled to images beyond 10k and it worked fine.
-
+**Recommended settings**: For best results, use tile_width & tile_height of "512" with a padding of "32" / "64". Set anti_aliasing_strength to 0.0-0.2 for optimal sharpness. 
 ## Example upscales
 
 ![Example upscale 01](./examples/seedvr2_tiling_001.png) 
@@ -17,9 +16,7 @@ The stitching code is not optimal. You will get the best results by using the ti
 
 ## Features
 
-- **Advanced Multi-Band Blending**: Frequency-separated processing eliminates seams while preserving detail
-- **Content-Aware Stitching**: Adaptive blending based on local image structure and edge strength
-- **Edge-Preserving Smoothing**: Bilateral filtering reduces artifacts without destroying fine details
+- **Multiple Blending Algorithms**: Choose from advanced stitching methods
 - **Memory Optimized**: Prevents OOM errors using configurable tile-based upscaling
 - **SeedVR2 Integration**: Works with SeedVR2 stable releases and nightly builds (3B/7B, FP16/FP8, sharp, GGUF)
 - **Advanced Tiling**: Linear and Chess tiling strategies with configurable overlap
@@ -30,7 +27,6 @@ The stitching code is not optimal. You will get the best results by using the ti
 
 - **Dynamic model list**: Available models are pulled from seedvr2 node when the nightly package is installed. Main (stable) version keeps the predefined models list.
 - **GGUF support**: SeedVR2 nightly supports GGUF models, these are now selectable in the dropdown once they are downloaded or discovered on disk.
-- **Backward compatibility**: Works with both stable and nightly SeedVR2 builds through automatic API detection.
 - **Extra Args support**: Connect the `SeedVR2ExtraArgs` node (from nightly) for advanced options like `preserve_vram`, `tiled_vae`, `cache_model`, `enable_debug`, and device selection.
 
 ## How It Works
@@ -38,10 +34,12 @@ The stitching code is not optimal. You will get the best results by using the ti
 1. Input image is divided into overlapping tiles
 2. Each tile is upscaled using SeedVR2 to a fixed resolution
 3. Upscaled tiles are resized to their final target dimensions
-4. **Advanced Multi-Band Stitching**: 
-   - **Zero-blur mode**: Frequency-separated blending preserves fine details while eliminating seams
-   - **Content-aware mode**: Structure-adaptive blending with edge-preserving smoothing
-   - **Bilateral filtering**: Reduces artifacts without destroying texture details
+4. **Advanced Multi-Band Stitching** - Multiple blending algorithms available:
+   - **Multi-band (Laplacian Pyramid)**: True frequency-separated blending using 4-level Laplacian pyramid decomposition. Blends each frequency band independently for seamless results while preserving fine details.
+   - **Bilateral Filtering**: Edge-preserving smoothing using OpenCV's bilateral filter (falls back to edge-aware Gaussian if OpenCV unavailable). Reduces artifacts without destroying texture details.
+   - **Content-Aware (Structure Tensor)**: Structure-adaptive blending using eigenvalue analysis of gradient matrices. Adapts blending weights based on local edge strength and coherence - prefers sharper tiles at edges, smooth blending in flat regions.
+   - **Linear Alpha Blending**: Traditional gradient-based alpha compositing with configurable blur radius.
+   - **Simple Averaging**: Pixel-perfect weighted averaging for maximum detail preservation.
 
 ## A personal suggestion
 
@@ -123,13 +121,11 @@ The node will appear in the `image/upscaling` category as "SeedVR2 Tiling Upscal
 
 ### Dependencies
 - torch>=1.9.0
-- torchvision>=0.10.0
 - numpy>=1.21.0
 - Pillow>=8.0.0
 - scipy>=1.7.0
-- scikit-image>=0.19.0 (optional, for advanced blending)
-- opencv-python>=4.5.0 (optional, for edge-preserving smoothing)
-- SeedVR2 node (installed separately)
+- opencv-python>=4.5.0 (for optimal bilateral filtering; falls back to scipy-based edge-aware smoothing if unavailable)
+- SeedVR2 node (installed separately via https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)
 
 ## Usage
 
@@ -179,31 +175,55 @@ This modular approach allows you to use the basic node without any extra configu
   - **Linear**: Process tiles row by row
   - **Chess**: Process tiles in checkerboard pattern for better blending
 
-### Detail Preservation
-- **mask_blur**: Blending control for tile edges (default: 0)
-  - **0**: Zero-blur mode - Maximum detail preservation through pixel averaging
+### Blending Configuration
+- **blending_method**: Algorithm for tile stitching (default: "auto")
+  - **auto**: Automatically selects method based on mask_blur
+  - **multiband**: Laplacian pyramid frequency-separated blending (best detail preservation)
+  - **bilateral**: Edge-preserving bilateral filter blending (best for artifact reduction)
+  - **content_aware**: Structure tensor adaptive blending (best for complex images)
+  - **linear**: Traditional gradient alpha blending (controlled by mask_blur)
+  - **simple**: Direct pixel averaging (fastest, good for high overlap)
+
+- **mask_blur**: Blending control for linear mode (default: 0)
+  - **0**: Minimal blending - Maximum detail preservation
   - **1-3**: Smart minimal blur - Hides seams while preserving details
   - **4+**: Traditional blur - Smoother blending with some detail loss
+  - Note: Only affects "linear" mode; other methods have built-in blending strategies
 
 ## Recommended Settings
 
-### Maximum Detail Preservation  
-- **mask_blur**: 0 (multi-band frequency separation)
+### Maximum Detail Preservation
+- **blending_method**: multiband (Laplacian pyramid)
 - **tile_padding**: 64 pixels (more overlap for better blending)
 - **tile_upscale_resolution**: Highest your VRAM allows
-- **anti_aliasing_strength**: 0.2 (subtle smoothing)
+- **anti_aliasing_strength**: 0.0-0.1
+- **tiling_strategy**: Chess
 
-### Balanced Quality & Speed
-- **mask_blur**: 2 (content-aware blending with bilateral filtering)
-- **tile_padding**: 32 pixels  
+### Artifact Reduction (Photos/Compressed Images)
+- **blending_method**: bilateral (edge-preserving filter)
+- **tile_padding**: 32-64 pixels
 - **tile_upscale_resolution**: 1024-1536
-- **anti_aliasing_strength**: 0.1
+- **anti_aliasing_strength**: 0.1-0.2
+- **tiling_strategy**: Chess
+
+### Complex Images (Varied Detail)
+- **blending_method**: content_aware (structure-adaptive)
+- **tile_padding**: 64 pixels
+- **tile_upscale_resolution**: 1536-2048
+- **anti_aliasing_strength**: 0.0-0.1
+- **tiling_strategy**: Chess
 
 ### Fast Processing
-- **mask_blur**: 1 (lightweight edge-preserving blend)
-- **tile_padding**: 16 pixels
+- **blending_method**: simple (pixel averaging)
+- **tile_padding**: 32 pixels
+- **tile_upscale_resolution**: 1024
 - **tiling_strategy**: Linear
 - **anti_aliasing_strength**: 0.0
+
+### Legacy/Backward Compatible
+- **blending_method**: auto
+- **mask_blur**: 0 for detail, 2-4 for smoothness
+- Other parameters as preferred
 
 ## Troubleshooting
 
@@ -215,22 +235,25 @@ This modular approach allows you to use the basic node without any extra configu
 - In `SeedVR2ExtraArgs`, reduce `vae_tile_size` for additional VAE memory savings
 
 ### Visible Seams
-- **New solution**: The advanced multi-band blending should eliminate most seams
-- Try `mask_blur`: 1 or 2 for content-aware blending
+- Try **blending_method**: multiband for frequency-separated seamless blending
+- Try **blending_method**: bilateral for edge-preserving smoothness
 - Increase `tile_padding` to 64+ pixels for more overlap
 - Use Chess tiling strategy for better distribution
+- Avoid `blending_method`: simple with low padding
 
 ### Detail Loss
-- Use `mask_blur`: 0 for multi-band frequency separation (preserves most detail)
+- Use **blending_method**: multiband for maximum detail preservation
+- Use **blending_method**: content_aware for edge-adaptive preservation
 - Ensure adequate `tile_padding` (64+ pixels recommended)
 - Increase `tile_upscale_resolution` if possible
-- Lower `anti_aliasing_strength` or set to 0
+- Set `anti_aliasing_strength` to 0
 
 ### Slow Processing
-- Use Linear tiling
-- `mask_blur`: 1 (lightweight processing)
-- Reduce `tile_padding` if seams aren't visible
+- Use **blending_method**: simple (fastest algorithm)
+- Use Linear tiling strategy (faster than Chess)
+- Reduce `tile_padding` to 16-32 if seams aren't visible
 - Set `anti_aliasing_strength`: 0
+- Note: multiband and content_aware are slower due to pyramid/structure computation
 
 ## Known issues
 

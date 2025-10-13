@@ -6,6 +6,12 @@ from PIL import Image
 from scipy import ndimage
 from scipy.signal import convolve2d
 from collections import defaultdict
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    print("Warning: OpenCV not available. Bilateral filtering will use Gaussian approximation.")
 from .image_utils import tensor_to_pil, pil_to_tensor
 from .seedvr2_adapter import build_execute_kwargs
 
@@ -146,18 +152,211 @@ def _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor):
     }
 
 
-def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0, extra_args=None):
-    """Main stitching function that chooses the appropriate method based on blur setting."""
-    if mask_blur == 0:
-        print("Using zero-blur mode for maximum detail preservation...")
-        result = process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image, extra_args=extra_args)
+def _build_laplacian_pyramid(image, levels=4):
+    """Build a Laplacian pyramid for multi-band blending.
+
+    Args:
+        image: numpy array (H, W, C)
+        levels: number of pyramid levels
+
+    Returns:
+        List of Laplacian pyramid levels (finest to coarsest)
+    """
+    gaussian_pyramid = [image.astype(np.float64)]
+
+    # Build Gaussian pyramid
+    for i in range(levels):
+        down = ndimage.zoom(gaussian_pyramid[-1], (0.5, 0.5, 1), order=1)
+        gaussian_pyramid.append(down)
+
+    # Build Laplacian pyramid
+    laplacian_pyramid = []
+    for i in range(levels):
+        # Upscale the next level
+        size = gaussian_pyramid[i].shape
+        upscaled = ndimage.zoom(gaussian_pyramid[i + 1],
+                               (size[0] / gaussian_pyramid[i + 1].shape[0],
+                                size[1] / gaussian_pyramid[i + 1].shape[1],
+                                1), order=1)
+        # Laplacian = Gaussian - upscaled(next_gaussian)
+        laplacian = gaussian_pyramid[i] - upscaled
+        laplacian_pyramid.append(laplacian)
+
+    # Add the smallest Gaussian as the last level
+    laplacian_pyramid.append(gaussian_pyramid[-1])
+
+    return laplacian_pyramid
+
+
+def _collapse_laplacian_pyramid(laplacian_pyramid):
+    """Collapse a Laplacian pyramid back to an image.
+
+    Args:
+        laplacian_pyramid: List of Laplacian levels (finest to coarsest)
+
+    Returns:
+        Reconstructed image as numpy array
+    """
+    # Start with the coarsest level
+    image = laplacian_pyramid[-1]
+
+    # Reconstruct from coarse to fine
+    for i in range(len(laplacian_pyramid) - 2, -1, -1):
+        # Upscale current image to match next level size
+        size = laplacian_pyramid[i].shape
+        upscaled = ndimage.zoom(image,
+                               (size[0] / image.shape[0],
+                                size[1] / image.shape[1],
+                                1), order=1)
+        # Add the Laplacian details
+        image = upscaled + laplacian_pyramid[i]
+
+    return image
+
+
+def _apply_bilateral_filter(image, d=9, sigma_color=75, sigma_space=75):
+    """Apply bilateral filtering for edge-preserving smoothing.
+
+    Args:
+        image: PIL Image or numpy array
+        d: Diameter of pixel neighborhood
+        sigma_color: Filter sigma in color space
+        sigma_space: Filter sigma in coordinate space
+
+    Returns:
+        Filtered image as numpy array
+    """
+    if isinstance(image, Image.Image):
+        img_array = np.array(image)
     else:
-        result = process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image, extra_args=extra_args)
-    
+        img_array = image
+
+    if HAS_OPENCV:
+        # Use OpenCV's optimized bilateral filter
+        filtered = cv2.bilateralFilter(img_array, d, sigma_color, sigma_space)
+    else:
+        # Fallback: Use Gaussian approximation
+        # This is not true bilateral filtering but provides some edge preservation
+        filtered = img_array.astype(np.float64)
+
+        # Apply edge-aware smoothing using gradients
+        for channel in range(3):
+            channel_data = filtered[:, :, channel]
+
+            # Detect edges
+            sobel_x = ndimage.sobel(channel_data, axis=1)
+            sobel_y = ndimage.sobel(channel_data, axis=0)
+            edge_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+
+            # Normalize and invert (smooth where no edges)
+            if edge_magnitude.max() > 0:
+                edge_magnitude = edge_magnitude / edge_magnitude.max()
+            smoothing_weight = 1.0 - edge_magnitude
+
+            # Apply adaptive Gaussian smoothing
+            smoothed = ndimage.gaussian_filter(channel_data, sigma=sigma_space / 10.0)
+            filtered[:, :, channel] = channel_data * edge_magnitude + smoothed * smoothing_weight
+
+        filtered = np.clip(filtered, 0, 255).astype(np.uint8)
+
+    return filtered
+
+
+def _compute_structure_tensor(image, sigma=1.5):
+    """Compute structure tensor for content-aware blending.
+
+    Args:
+        image: numpy array (H, W, C)
+        sigma: Gaussian smoothing sigma for structure tensor
+
+    Returns:
+        edge_strength: Edge strength map (H, W)
+        coherence: Local structure coherence (H, W)
+    """
+    # Convert to grayscale for structure analysis
+    if len(image.shape) == 3:
+        gray = np.mean(image, axis=2)
+    else:
+        gray = image
+
+    # Compute gradients
+    Ix = ndimage.sobel(gray, axis=1)
+    Iy = ndimage.sobel(gray, axis=0)
+
+    # Compute structure tensor components
+    Ixx = ndimage.gaussian_filter(Ix * Ix, sigma)
+    Iyy = ndimage.gaussian_filter(Iy * Iy, sigma)
+    Ixy = ndimage.gaussian_filter(Ix * Iy, sigma)
+
+    # Compute eigenvalues for edge strength and coherence
+    # Trace and determinant
+    trace = Ixx + Iyy
+    det = Ixx * Iyy - Ixy * Ixy
+
+    # Eigenvalues: lambda = (trace ± sqrt(trace^2 - 4*det)) / 2
+    discriminant = np.maximum(trace * trace - 4 * det, 0)
+    lambda1 = (trace + np.sqrt(discriminant)) / 2
+    lambda2 = (trace - np.sqrt(discriminant)) / 2
+
+    # Edge strength (larger eigenvalue)
+    edge_strength = lambda1
+
+    # Coherence (anisotropy measure)
+    coherence = np.zeros_like(trace)
+    mask = lambda1 > 1e-5
+    coherence[mask] = (lambda1[mask] - lambda2[mask]) / (lambda1[mask] + lambda2[mask])
+
+    # Normalize
+    if edge_strength.max() > 0:
+        edge_strength = edge_strength / edge_strength.max()
+    coherence = np.clip(coherence, 0, 1)
+
+    return edge_strength, coherence
+
+
+def process_and_stitch(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, anti_aliasing_strength=0.0, extra_args=None, blending_method="auto"):
+    """Main stitching function that chooses the appropriate method based on settings.
+
+    Args:
+        blending_method: One of "auto", "multiband", "bilateral", "content_aware", "linear", "simple"
+    """
+    # Auto mode: choose based on mask_blur value
+    if blending_method == "auto":
+        if mask_blur == 0:
+            blending_method = "simple"
+        elif mask_blur <= 2:
+            blending_method = "linear"
+        else:
+            blending_method = "linear"
+
+    print(f"Using {blending_method} blending method...")
+
+    # Route to appropriate blending function
+    if blending_method == "multiband":
+        result = process_and_stitch_multiband(tiles, width, height, seedvr2_instance, model, seed,
+                                             tile_upscale_resolution, preserve_vram, block_swap_config,
+                                             upscale_factor, progress, base_image, extra_args=extra_args)
+    elif blending_method == "bilateral":
+        result = process_and_stitch_bilateral(tiles, width, height, seedvr2_instance, model, seed,
+                                             tile_upscale_resolution, preserve_vram, block_swap_config,
+                                             upscale_factor, mask_blur, progress, base_image, extra_args=extra_args)
+    elif blending_method == "content_aware":
+        result = process_and_stitch_content_aware(tiles, width, height, seedvr2_instance, model, seed,
+                                                 tile_upscale_resolution, preserve_vram, block_swap_config,
+                                                 upscale_factor, mask_blur, progress, base_image, extra_args=extra_args)
+    elif blending_method == "simple":
+        result = process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed,
+                                             tile_upscale_resolution, preserve_vram, block_swap_config,
+                                             upscale_factor, progress, base_image, extra_args=extra_args)
+    else:  # "linear" or default
+        result = process_and_stitch_blended(tiles, width, height, seedvr2_instance, model, seed,
+                                           tile_upscale_resolution, preserve_vram, block_swap_config,
+                                           upscale_factor, mask_blur, progress, base_image, extra_args=extra_args)
+
     # Apply anti-aliasing if requested
     if anti_aliasing_strength > 0:
         result = apply_edge_aware_antialiasing(result, anti_aliasing_strength)
-    
+
     return result
 
 
@@ -202,6 +401,261 @@ def apply_edge_aware_antialiasing(image, strength):
     # Convert back to uint8 and PIL Image
     smoothed = np.clip(smoothed, 0, 255).astype(np.uint8)
     return Image.fromarray(smoothed)
+
+
+def process_and_stitch_multiband(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image=None, extra_args=None):
+    """Multi-band blending using Laplacian pyramids for frequency-separated stitching."""
+    # Create base image
+    base_image = _create_base_image(
+        seedvr2_instance, width, height, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args, base_image
+    )
+
+    # Batch process and upscale tiles
+    progress.update_sub_progress("AI Upscaling", 1)
+    upscaled_tiles = _batch_upscale_tiles(
+        tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args
+    )
+
+    # Build Laplacian pyramid for base image
+    base_array = np.array(base_image, dtype=np.float64)
+    pyramid_levels = 4
+    output_pyramid = _build_laplacian_pyramid(base_array, pyramid_levels)
+
+    # Process each tile and blend into pyramid
+    for tile_idx, tile_info in enumerate(tiles):
+        ai_upscaled_tile = upscaled_tiles[tile_idx]
+
+        progress.update_sub_progress("Resizing & Positioning", 2)
+        prepared = _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor)
+        cropped_tile = prepared["cropped_tile"]
+        paste_x_adjusted = prepared["paste_x"]
+        paste_y_adjusted = prepared["paste_y"]
+
+        progress.update_sub_progress("Multi-band Blending", 3)
+
+        # Build Laplacian pyramid for this tile
+        tile_array = np.array(cropped_tile, dtype=np.float64)
+
+        # Create full-size tile array
+        full_tile_array = np.zeros((height, width, 3), dtype=np.float64)
+        end_x = min(paste_x_adjusted + tile_array.shape[1], width)
+        end_y = min(paste_y_adjusted + tile_array.shape[0], height)
+
+        tile_height = end_y - paste_y_adjusted
+        tile_width = end_x - paste_x_adjusted
+        full_tile_array[paste_y_adjusted:end_y, paste_x_adjusted:end_x] = tile_array[:tile_height, :tile_width]
+
+        # Build pyramid for this tile
+        tile_pyramid = _build_laplacian_pyramid(full_tile_array, pyramid_levels)
+
+        # Create blending mask
+        mask = np.zeros((height, width), dtype=np.float64)
+        mask[paste_y_adjusted:end_y, paste_x_adjusted:end_x] = 1.0
+
+        # Apply feathering to mask based on overlap
+        feather_size = min(32, tile_width // 4, tile_height // 4)
+        if feather_size > 0:
+            for y in range(paste_y_adjusted, end_y):
+                for x in range(paste_x_adjusted, end_x):
+                    dist_x = min(x - paste_x_adjusted, end_x - 1 - x)
+                    dist_y = min(y - paste_y_adjusted, end_y - 1 - y)
+                    dist = min(dist_x, dist_y)
+                    if dist < feather_size:
+                        mask[y, x] = dist / feather_size
+
+        # Build pyramid for mask
+        mask_pyramid = []
+        current_mask = mask
+        for i in range(pyramid_levels + 1):
+            mask_pyramid.append(current_mask)
+            if i < pyramid_levels:
+                current_mask = ndimage.zoom(current_mask, 0.5, order=1)
+
+        # Blend each level of the pyramid
+        blended_pyramid = []
+        for level in range(len(tile_pyramid)):
+            # Get mask for this level (already downsampled in mask_pyramid)
+            mask_level = mask_pyramid[level]
+
+            # Ensure mask matches pyramid level dimensions exactly
+            level_height, level_width = output_pyramid[level].shape[:2]
+            if mask_level.shape[0] != level_height or mask_level.shape[1] != level_width:
+                # Resample if needed
+                mask_level = ndimage.zoom(mask_level,
+                                         (level_height / mask_level.shape[0],
+                                          level_width / mask_level.shape[1]), order=1)
+
+            # Add channel dimension
+            mask_level = mask_level[:, :, np.newaxis]
+
+            # Blend: output * (1 - mask) + tile * mask
+            blended = output_pyramid[level] * (1 - mask_level) + tile_pyramid[level] * mask_level
+            blended_pyramid.append(blended)
+
+        output_pyramid = blended_pyramid
+
+        progress.update()
+
+    # Collapse pyramid to final image
+    output_array = _collapse_laplacian_pyramid(output_pyramid)
+    output_array = np.clip(output_array, 0, 255).astype(np.uint8)
+    return Image.fromarray(output_array)
+
+
+def process_and_stitch_bilateral(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, extra_args=None):
+    """Bilateral filtering-based stitching for edge-preserving blending."""
+    # Create base image
+    base_image = _create_base_image(
+        seedvr2_instance, width, height, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args, base_image
+    )
+
+    output_image = base_image.copy()
+    output_array = np.array(output_image, dtype=np.float64)
+    weight_array = np.zeros((height, width), dtype=np.float64)
+
+    # Batch process and upscale tiles
+    progress.update_sub_progress("AI Upscaling", 1)
+    upscaled_tiles = _batch_upscale_tiles(
+        tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args
+    )
+
+    # Process each tile
+    for tile_idx, tile_info in enumerate(tiles):
+        ai_upscaled_tile = upscaled_tiles[tile_idx]
+
+        progress.update_sub_progress("Resizing & Positioning", 2)
+        prepared = _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor)
+        cropped_tile = prepared["cropped_tile"]
+        paste_x_adjusted = prepared["paste_x"]
+        paste_y_adjusted = prepared["paste_y"]
+
+        progress.update_sub_progress("Bilateral Filtering", 3)
+
+        # Apply bilateral filter to tile for edge-preserving smoothing
+        tile_array = _apply_bilateral_filter(cropped_tile, d=9, sigma_color=75, sigma_space=75)
+        tile_array = tile_array.astype(np.float64)
+
+        # Define region
+        end_x = min(paste_x_adjusted + tile_array.shape[1], width)
+        end_y = min(paste_y_adjusted + tile_array.shape[0], height)
+
+        # Blend with weighted averaging
+        for y in range(paste_y_adjusted, end_y):
+            for x in range(paste_x_adjusted, end_x):
+                tile_x = x - paste_x_adjusted
+                tile_y = y - paste_y_adjusted
+
+                if 0 <= y < height and 0 <= x < width and tile_y < tile_array.shape[0] and tile_x < tile_array.shape[1]:
+                    # Distance-based weight (favor center of tile)
+                    dist_x = min(tile_x, tile_array.shape[1] - 1 - tile_x)
+                    dist_y = min(tile_y, tile_array.shape[0] - 1 - tile_y)
+                    tile_weight = min(dist_x, dist_y) / max(tile_array.shape[1], tile_array.shape[0])
+                    tile_weight = max(0.1, tile_weight)  # Minimum weight
+
+                    current_weight = weight_array[y, x]
+                    new_weight = current_weight + tile_weight
+
+                    if current_weight > 0:
+                        output_array[y, x] = (output_array[y, x] * current_weight + tile_array[tile_y, tile_x] * tile_weight) / new_weight
+                    else:
+                        output_array[y, x] = tile_array[tile_y, tile_x]
+
+                    weight_array[y, x] = new_weight
+
+        progress.update()
+
+    output_array = np.clip(output_array, 0, 255).astype(np.uint8)
+    return Image.fromarray(output_array)
+
+
+def process_and_stitch_content_aware(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, mask_blur, progress, base_image=None, extra_args=None):
+    """Content-aware stitching using structure tensor for adaptive blending."""
+    # Create base image
+    base_image = _create_base_image(
+        seedvr2_instance, width, height, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args, base_image
+    )
+
+    output_array = np.array(base_image, dtype=np.float64)
+    weight_array = np.zeros((height, width), dtype=np.float64)
+
+    # Compute global structure for base image
+    base_edge_strength, base_coherence = _compute_structure_tensor(output_array)
+
+    # Batch process and upscale tiles
+    progress.update_sub_progress("AI Upscaling", 1)
+    upscaled_tiles = _batch_upscale_tiles(
+        tiles, seedvr2_instance, model, seed, tile_upscale_resolution,
+        preserve_vram, block_swap_config, extra_args
+    )
+
+    # Process each tile
+    for tile_idx, tile_info in enumerate(tiles):
+        ai_upscaled_tile = upscaled_tiles[tile_idx]
+
+        progress.update_sub_progress("Resizing & Positioning", 2)
+        prepared = _prepare_tile_for_stitching(tile_info, ai_upscaled_tile, upscale_factor)
+        cropped_tile = prepared["cropped_tile"]
+        paste_x_adjusted = prepared["paste_x"]
+        paste_y_adjusted = prepared["paste_y"]
+
+        progress.update_sub_progress("Content-Aware Blending", 3)
+
+        tile_array = np.array(cropped_tile, dtype=np.float64)
+
+        # Compute structure tensor for this tile
+        tile_edge_strength, tile_coherence = _compute_structure_tensor(tile_array)
+
+        # Define region
+        end_x = min(paste_x_adjusted + tile_array.shape[1], width)
+        end_y = min(paste_y_adjusted + tile_array.shape[0], height)
+
+        # Adaptive blending based on local structure
+        for y in range(paste_y_adjusted, end_y):
+            for x in range(paste_x_adjusted, end_x):
+                tile_x = x - paste_x_adjusted
+                tile_y = y - paste_y_adjusted
+
+                if 0 <= y < height and 0 <= x < width and tile_y < tile_array.shape[0] and tile_x < tile_array.shape[1]:
+                    # Get local structure information
+                    local_edge = base_edge_strength[y, x]
+                    local_coherence = base_coherence[y, x]
+                    tile_edge = tile_edge_strength[tile_y, tile_x]
+
+                    # Adaptive weight based on edge strength and coherence
+                    # Higher coherence = more structured = use edge-adaptive blending
+                    # Lower coherence = less structured = use smooth blending
+                    base_weight = 1.0 - local_coherence * 0.5
+                    tile_weight = 1.0 - local_coherence * 0.5
+
+                    # In edge regions, prefer the sharper tile
+                    if tile_edge > local_edge:
+                        tile_weight *= (1.0 + (tile_edge - local_edge))
+
+                    # Distance-based modulation
+                    dist_x = min(tile_x, tile_array.shape[1] - 1 - tile_x)
+                    dist_y = min(tile_y, tile_array.shape[0] - 1 - tile_y)
+                    dist_weight = min(dist_x, dist_y) / max(tile_array.shape[1], tile_array.shape[0])
+                    tile_weight *= max(0.1, dist_weight)
+
+                    current_weight = weight_array[y, x]
+                    new_weight = current_weight + tile_weight
+
+                    if current_weight > 0:
+                        output_array[y, x] = (output_array[y, x] * current_weight + tile_array[tile_y, tile_x] * tile_weight) / new_weight
+                    else:
+                        output_array[y, x] = tile_array[tile_y, tile_x]
+
+                    weight_array[y, x] = new_weight
+
+        progress.update()
+
+    output_array = np.clip(output_array, 0, 255).astype(np.uint8)
+    return Image.fromarray(output_array)
 
 
 def process_and_stitch_zero_blur(tiles, width, height, seedvr2_instance, model, seed, tile_upscale_resolution, preserve_vram, block_swap_config, upscale_factor, progress, base_image=None, extra_args=None):
