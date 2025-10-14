@@ -1,4 +1,4 @@
-# SeedVR2 Tiling Upscaler
+# SeedVR2 Tiling Upscaler (for single images)
 
 A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models with advanced tiling and detail-preserving stitching.
 
