@@ -1,8 +1,8 @@
 {
   "id": "ae70f9f9-9985-4bef-8e4e-0d4c1f281e51",
   "revision": 0,
-  "last_node_id": 137,
-  "last_link_id": 182,
+  "last_node_id": 138,
+  "last_link_id": 183,
   "nodes": [
     {
       "id": 134,
@@ -16,7 +16,7 @@
         1160
       ],
       "flags": {},
-      "order": 5,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {
@@ -47,12 +47,12 @@
           {
             "name": "A",
             "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_esnqk_00005_.png&type=temp&subfolder=&rand=0.5669334104517141"
+            "url": "/api/view?filename=rgthree.compare._temp_eooyf_00007_.png&type=temp&subfolder=&rand=0.15463629813012403"
           },
           {
             "name": "B",
             "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_esnqk_00006_.png&type=temp&subfolder=&rand=0.691890404054576"
+            "url": "/api/view?filename=rgthree.compare._temp_eooyf_00008_.png&type=temp&subfolder=&rand=0.16614178550786762"
           }
         ]
       ],
@@ -106,45 +106,6 @@
       "bgcolor": "#353"
     },
     {
-      "id": 136,
-      "type": "SeedVR2BlockSwap",
-      "pos": [
-        -11540,
-        6220
-      ],
-      "size": [
-        287.776123046875,
-        154
-      ],
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "block_swap_config",
-          "type": "block_swap_config",
-          "links": [
-            180
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "numz/ComfyUI-SeedVR2_VideoUpscaler",
-        "ver": "4df5cef5937001bcef056d5508c6a884849ffe13",
-        "Node name for S&R": "SeedVR2BlockSwap",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.2.2",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        30,
-        true
-      ]
-    },
-    {
       "id": 135,
       "type": "SaveImage",
       "pos": [
@@ -158,7 +119,7 @@
       "flags": {
         "collapsed": false
       },
-      "order": 6,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
@@ -184,72 +145,6 @@
       "bgcolor": "#353"
     },
     {
-      "id": 137,
-      "type": "SeedVR2TilingUpscaler",
-      "pos": [
-        -11200,
-        6220
-      ],
-      "size": [
-        285.9403076171875,
-        338
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 179
-        },
-        {
-          "name": "block_swap_config",
-          "shape": 7,
-          "type": "block_swap_config",
-          "link": 180
-        },
-        {
-          "name": "extra_args",
-          "shape": 7,
-          "type": "extra_args",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            181,
-            182
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "moonwhaler/UltimateResupscaler",
-        "ver": "85cf73954d480263dad91280b81c752a39382f77",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {}
-        },
-        "Node name for S&R": "SeedVR2TilingUpscaler"
-      },
-      "widgets_values": [
-        "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
-        100,
-        "randomize",
-        2496,
-        512,
-        512,
-        0,
-        32,
-        1024,
-        "Chess",
-        0
-      ]
-    },
-    {
       "id": 130,
       "type": "MarkdownNote",
       "pos": [
@@ -261,7 +156,7 @@
         100
       ],
       "flags": {},
-      "order": 2,
+      "order": 1,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -289,7 +184,7 @@
         120
       ],
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -304,6 +199,158 @@
       ],
       "color": "#332922",
       "bgcolor": "#593930"
+    },
+    {
+      "id": 136,
+      "type": "SeedVR2BlockSwap",
+      "pos": [
+        -11540,
+        6220
+      ],
+      "size": [
+        280,
+        160
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "block_swap_config",
+          "type": "block_swap_config",
+          "links": [
+            180
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "seedvr2_videoupscaler",
+        "ver": "4df5cef5937001bcef056d5508c6a884849ffe13",
+        "Node name for S&R": "SeedVR2BlockSwap",
+        "aux_id": "numz/ComfyUI-SeedVR2_VideoUpscaler",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.2.2",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        30,
+        true
+      ]
+    },
+    {
+      "id": 138,
+      "type": "SeedVR2ExtraArgs",
+      "pos": [
+        -11540,
+        6420
+      ],
+      "size": [
+        280,
+        202
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "extra_args",
+          "type": "extra_args",
+          "links": [
+            183
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "seedvr2_videoupscaler",
+        "ver": "984f9af478cbde993c36f1006625753498d2c08d",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "SeedVR2ExtraArgs"
+      },
+      "widgets_values": [
+        false,
+        512,
+        64,
+        true,
+        false,
+        false,
+        "cuda:0"
+      ]
+    },
+    {
+      "id": 137,
+      "type": "SeedVR2TilingUpscaler",
+      "pos": [
+        -11200,
+        6220
+      ],
+      "size": [
+        285.9403076171875,
+        412
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 179
+        },
+        {
+          "name": "block_swap_config",
+          "shape": 7,
+          "type": "block_swap_config",
+          "link": 180
+        },
+        {
+          "name": "extra_args",
+          "shape": 7,
+          "type": "extra_args",
+          "link": 183
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            181,
+            182
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "moonwhaler/UltimateResupscaler",
+        "ver": "85cf73954d480263dad91280b81c752a39382f77",
+        "Node name for S&R": "SeedVR2TilingUpscaler",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.3"
+        }
+      },
+      "widgets_values": [
+        "seedvr2_ema_7b-Q8_0.gguf",
+        644596367,
+        "randomize",
+        4000,
+        1024,
+        1024,
+        0,
+        32,
+        1024,
+        "Chess",
+        0,
+        "multiband",
+        "Upscale completed!"
+      ]
     }
   ],
   "links": [
@@ -346,19 +393,27 @@
       135,
       0,
       "IMAGE"
+    ],
+    [
+      183,
+      138,
+      0,
+      137,
+      2,
+      "extra_args"
     ]
   ],
   "groups": [],
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.9646149645000011,
+      "scale": 1.1671841070450033,
       "offset": [
-        12783.329113262835,
-        -5402.004000866147
+        12176.545542679234,
+        -5880.23007198703
       ]
     },
-    "frontendVersion": "1.27.10",
+    "frontendVersion": "1.28.7",
     "ue_links": [],
     "links_added_by_ue": [],
     "VHS_latentpreview": false,
