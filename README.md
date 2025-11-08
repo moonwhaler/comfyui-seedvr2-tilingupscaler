@@ -4,7 +4,8 @@ A ComfyUI custom node for memory-efficient image upscaling using SeedVR2 models 
 
 WARNING: This is not magic - although it sometimes may seem that way. It will alter details and it might even change things you don't like. But in my testing the outputs are more convincing than any other detailer / upscaler process I tested so far. Personally, I use it to refine Flux / ... outputs and enhance skin detail (or any detail) for further, more natural looking training datasets. Upscaling for print use is also one way to use this.
 
-**Recommended settings**: For best results, use tile_width & tile_height of "512" with a padding of "32" / "64". Set anti_aliasing_strength to 0.0-0.2 for optimal sharpness. 
+**Recommended settings**: For best results, if you have enough VRAM, use tile_width & tile_height of "1024" with a padding of "32" / "64". Set anti_aliasing_strength to 0.0-0.2 for optimal sharpness. 
+
 ## Example upscales
 
 ![Example upscale 01](./examples/seedvr2_tiling_001.png) 
