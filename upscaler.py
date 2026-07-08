@@ -36,7 +36,7 @@ class SeedVR2TilingUpscaler:
                     "min": 16,
                     "max": 16384,
                     "step": 16,
-                    "tooltip": "Target resolution for the longest side of output. Aspect ratio is maintained."
+                    "tooltip": "Target resolution in pixels for the side selected by 'resolution_target' (longest or shortest). Aspect ratio is maintained."
                 }),
                 "tile_width": ("INT", {
                     "default": 512,
