@@ -167,6 +167,12 @@ This modular approach allows you to use the basic node without any extra configu
   - Higher values = better quality, more memory usage
   - Recommended: 1024-2048 depending on VRAM
 
+- **tile_batch_size**: How many tiles are sent to SeedVR2 in a single call (default: 1)
+  - **1**: One tile at a time - lowest VRAM usage (recommended)
+  - **5, 9, 13, 17, 21**: Faster, but VRAM usage scales with the batch size
+  - Values are snapped down to SeedVR2's required 4n+1 pattern, and never exceed the number of tiles left in the current size group
+  - Note: SeedVR2 treats a batch as consecutive video frames, so batching unrelated tiles trades some quality for speed
+
 ### Tiling Configuration
 - **tile_width/height**: Size of each tile in pixels (default: 512x512)
 - **tile_padding**: Overlap between tiles in pixels (default: 32)
@@ -227,6 +233,7 @@ This modular approach allows you to use the basic node without any extra configu
 ## Troubleshooting
 
 ### OOM Errors
+- Set `tile_batch_size` to 1 (this is the default; higher values multiply VRAM usage)
 - Reduce `tile_upscale_resolution`
 - Connect the `SeedVR2ExtraArgs` node and enable `preserve_vram` and/or `tiled_vae`
 - Reduce `tile_width` and `tile_height`
@@ -248,6 +255,7 @@ This modular approach allows you to use the basic node without any extra configu
 - Set `anti_aliasing_strength` to 0
 
 ### Slow Processing
+- Increase `tile_batch_size` to 5 or 9 if you have VRAM headroom
 - Use **blending_method**: simple (fastest algorithm)
 - Use Linear tiling strategy (faster than Chess)
 - Reduce `tile_padding` to 16-32 if seams aren't visible
