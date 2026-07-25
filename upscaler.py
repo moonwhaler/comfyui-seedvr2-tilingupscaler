@@ -36,7 +36,7 @@ class SeedVR2TilingUpscaler:
                     "min": 16,
                     "max": 16384,
                     "step": 16,
-                    "tooltip": "Target resolution for the longest side of output. Aspect ratio is maintained."
+                    "tooltip": "Target resolution in pixels for the side selected by 'resolution_target' (longest or shortest). Aspect ratio is maintained."
                 }),
                 "tile_width": ("INT", {
                     "default": 512,
@@ -91,6 +91,10 @@ class SeedVR2TilingUpscaler:
                     "default": "lab",
                     "tooltip": "Color correction method to match upscaled output to original input colors. lab=perceptual matching (recommended), wavelet=frequency-based, wavelet_adaptive=with saturation correction, hsv=hue-conditional, adain=style transfer, none=disabled."
                 }),
+                "resolution_target": (["longest", "shortest"], {
+                    "default": "longest",
+                    "tooltip": "Which side 'new_resolution' applies to. 'longest'=fit longest side (original behavior), 'shortest'=fit shortest side (larger output for the same value). Aspect ratio is maintained either way."
+                }),
             },
         }
 
@@ -100,7 +104,8 @@ class SeedVR2TilingUpscaler:
 
     def upscale(self, image, dit, vae, seed, new_resolution, tile_width, tile_height,
                 mask_blur, tile_padding, tile_upscale_resolution, tiling_strategy,
-                anti_aliasing_strength, blending_method="auto", color_correction="lab"):
+                anti_aliasing_strength, blending_method="auto", color_correction="lab",
+                resolution_target="longest"):
         try:
             # Initialize progress tracking
             progress = Progress(0)  # Will update with actual count later
@@ -108,7 +113,11 @@ class SeedVR2TilingUpscaler:
 
             # Setup
             pil_image = tensor_to_pil(image)
-            upscale_factor = new_resolution / max(pil_image.width, pil_image.height)
+            if resolution_target == "shortest":
+                reference_side = min(pil_image.width, pil_image.height)
+            else:
+                reference_side = max(pil_image.width, pil_image.height)
+            upscale_factor = new_resolution / reference_side
             output_width = int(pil_image.width * upscale_factor)
             output_height = int(pil_image.height * upscale_factor)
 
