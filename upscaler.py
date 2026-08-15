@@ -71,7 +71,7 @@ class SeedVR2TilingUpscaler:
                     "min": 64,
                     "max": 8192,
                     "step": 8,
-                    "tooltip": "Maximum resolution for upscaling individual tiles. Higher=better quality but more VRAM. Try 1024-2048."
+                    "tooltip": "Ceiling on the resolution used to AI-upscale each tile. Each tile is scaled by the same overall factor as the full image; this only kicks in to cap tiles that would otherwise exceed it. Higher=better quality but more VRAM. Try 1024-2048."
                 }),
                 "tiling_strategy": (["Chess", "Linear"], {
                     "tooltip": "Tile processing order. Chess=checkerboard pattern for better blending, Linear=row-by-row (faster)."
